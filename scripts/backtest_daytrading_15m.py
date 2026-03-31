@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-Daytrading backtest: 15-minute EMA crossover + RSI + Volume confirmation.
-Uses data/daytrading_15m/ collected by scripts/collect_15m_daytrading.py
+Daytrading backtest: EMA crossover + RSI + ATR-TP signal.
+Supports both 15m data (data/daytrading_15m/) and 1h data (data/mentor_cache_1h/).
 
 Signal logic:
   BUY  when: EMA9 crosses above EMA21 AND RSI(14) > 45 AND RSI not overbought (<70)
   SELL when: EMA9 crosses below EMA21 OR RSI(14) > 72 (take profit on overbought)
 
 Exit logic (per position):
-  - TP: +1.8% (ATR-adjustable)
+  - TP: +1.8% (ATR-adjustable, or +3.5% in 1h mode)
   - SL: -1.2%
-  - Force-close: 8h max hold
+  - Force-close: 8h max hold (or 48h in 1h mode)
 
 Usage:
-    # First collect data:
+    # 15m data (need to collect first):
     python3 scripts/collect_15m_daytrading.py --days 90
-
-    # Then backtest:
     python3 scripts/backtest_daytrading_15m.py --days 90 --initial 200
-    python3 scripts/backtest_daytrading_15m.py --days 90 --initial 200 --tp 2.0 --sl 1.0
 
-    # Parameter sweep:
+    # 1h fallback (uses data/mentor_cache_1h/ — no collection needed):
+    python3 scripts/backtest_daytrading_15m.py --use-1h --days 60 --initial 200
+    python3 scripts/backtest_daytrading_15m.py --use-1h --sweep
+
+    # Parameter sweep on 15m:
     python3 scripts/backtest_daytrading_15m.py --sweep
 """
 import argparse
@@ -35,6 +36,7 @@ import numpy as np
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
 DATA_DIR = Path("data/daytrading_15m")
+MENTOR_CACHE_DIR = Path("data/mentor_cache_1h")
 INTERVAL_MIN = 15
 CANDLE_SEC = INTERVAL_MIN * 60
 
@@ -140,6 +142,19 @@ def load_15m_data(pair: str, since_ts: int, end_ts: int) -> Dict[int, float]:
     return {k: v for k, v in raw.items() if since_ts <= k <= end_ts}
 
 
+def load_1h_data(pair: str, since_ts: int, end_ts: int) -> Dict[int, float]:
+    """Merge all 60m cache files for this pair, return filtered by time range."""
+    result: Dict[int, float] = {}
+    for f in sorted(MENTOR_CACHE_DIR.glob(f"{pair}_*_60m.json")):
+        raw = {int(k): float(v) for k, v in json.loads(f.read_text()).items()}
+        result.update(raw)
+    return {k: v for k, v in result.items() if since_ts <= k <= end_ts}
+
+
+def load_data(pair: str, since_ts: int, end_ts: int, use_1h: bool) -> Dict[int, float]:
+    return load_1h_data(pair, since_ts, end_ts) if use_1h else load_15m_data(pair, since_ts, end_ts)
+
+
 # ── Backtest ──────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -162,20 +177,29 @@ def run_backtest(
     atr_tp_mult: float = 1.2,
     cooldown_min: int = 30,
     max_positions: int = 2,
+    use_1h: bool = False,
 ) -> dict:
     end_ts = int(datetime.now(timezone.utc).timestamp())
     since_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
 
+    candle_sec = 3600 if use_1h else CANDLE_SEC
+    mode_label = "ema-1h-crossover" if use_1h else "daytrading-15m-ema"
+
     # Load data
     series: Dict[str, Dict[int, float]] = {}
     for p in PAIRS:
-        d = load_15m_data(p, since_ts, end_ts)
+        d = load_data(p, since_ts, end_ts, use_1h)
         if d:
             series[p] = d
 
     available_pairs = list(series.keys())
     if not available_pairs:
-        return {"error": "No 15m data found. Run: python3 scripts/collect_15m_daytrading.py --days 90"}
+        msg = (
+            "No 1h cache data found. Expected data/mentor_cache_1h/*_60m.json"
+            if use_1h else
+            "No 15m data found. Run: python3 scripts/collect_15m_daytrading.py --days 90"
+        )
+        return {"error": msg}
 
     all_ts = sorted(set().union(*[set(v.keys()) for v in series.values()]))
 
@@ -255,7 +279,7 @@ def run_backtest(
                 if pnl_eur < 0:
                     consecutive_losses += 1
                     if consecutive_losses >= 3:
-                        pause_until = max(pause_until, ts + 2 * 3600)
+                        pause_until = max(pause_until, ts + 2 * 3600 * (4 if use_1h else 1))
                 else:
                     consecutive_losses = 0
                 pos[p] = Position()
@@ -349,32 +373,47 @@ def run_backtest(
             "ema_fast": EMA_FAST, "ema_slow": EMA_SLOW, "rsi_period": RSI_PERIOD,
             "available_pairs": available_pairs,
         },
-        "assumptions": {"fee_rate": fee_rate, "slippage_bps": slippage_bps, "mode": "daytrading-15m-ema"},
+        "assumptions": {"fee_rate": fee_rate, "slippage_bps": slippage_bps, "mode": mode_label},
     }
 
 
-def sweep(days: int, initial: float, fee: float, slip: float) -> None:
-    configs = [
-        dict(tp_pct=1.5, sl_pct=0.8, max_hold_h=4,  cooldown_min=20),
-        dict(tp_pct=1.8, sl_pct=1.0, max_hold_h=6,  cooldown_min=30),
-        dict(tp_pct=2.0, sl_pct=1.2, max_hold_h=8,  cooldown_min=30),
-        dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=12, cooldown_min=45),
-        dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=16, cooldown_min=60),
-    ]
-    print(f"{'Config':<40} {'Return':>8} {'WR':>5} {'Trades':>7} {'MaxDD':>7}")
+def sweep(days: int, initial: float, fee: float, slip: float, use_1h: bool = False) -> None:
+    if use_1h:
+        # Wider params suitable for 1h EMA signals
+        configs = [
+            dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=24,  cooldown_min=120),
+            dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=36,  cooldown_min=180),
+            dict(tp_pct=3.5, sl_pct=2.0, max_hold_h=48,  cooldown_min=240),
+            dict(tp_pct=4.0, sl_pct=2.0, max_hold_h=60,  cooldown_min=240),
+            dict(tp_pct=5.0, sl_pct=2.5, max_hold_h=72,  cooldown_min=360),
+        ]
+    else:
+        configs = [
+            dict(tp_pct=1.5, sl_pct=0.8, max_hold_h=4,  cooldown_min=20),
+            dict(tp_pct=1.8, sl_pct=1.0, max_hold_h=6,  cooldown_min=30),
+            dict(tp_pct=2.0, sl_pct=1.2, max_hold_h=8,  cooldown_min=30),
+            dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=12, cooldown_min=45),
+            dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=16, cooldown_min=60),
+        ]
+    mode = "1h" if use_1h else "15m"
+    print(f"\n{'─'*75}")
+    print(f"  EMA crossover sweep — {mode} mode, {days}d history, €{initial:.0f} initial")
+    print(f"{'─'*75}")
+    print(f"{'Config':<44} {'Return':>8} {'WR':>5} {'Trades':>7} {'MaxDD':>7}")
     print("-" * 75)
     for c in configs:
-        r = run_backtest(days, initial, fee, slip, **c)
+        r = run_backtest(days, initial, fee, slip, use_1h=use_1h, **c)
         if "error" in r:
             print(r["error"])
             return
-        label = f"TP{c['tp_pct']}%/SL{c['sl_pct']}%/{c['max_hold_h']}h/{c['cooldown_min']}min"
-        print(f"{label:<40} {r['return_pct']:>+7.2f}% {r['winrate_pct']:>4.0f}% "
+        h = c['max_hold_h']
+        label = f"TP{c['tp_pct']}%/SL{c['sl_pct']}%/{h}h/{c['cooldown_min']}min"
+        print(f"{label:<44} {r['return_pct']:>+7.2f}% {r['winrate_pct']:>4.0f}% "
               f"{r['closed_trades']:>6}  {r['max_drawdown_pct']:>6.1f}%")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="15m EMA crossover daytrading backtest")
+    ap = argparse.ArgumentParser(description="EMA crossover daytrading backtest (15m or 1h)")
     ap.add_argument("--days", type=int, default=90)
     ap.add_argument("--initial", type=float, default=200.0)
     ap.add_argument("--fee", type=float, default=0.0026)
@@ -384,17 +423,31 @@ def main():
     ap.add_argument("--max-hold-h", type=float, default=8.0, help="Max hold hours")
     ap.add_argument("--cooldown", type=int, default=30, help="Entry cooldown minutes")
     ap.add_argument("--sweep", action="store_true", help="Run parameter sweep")
+    ap.add_argument("--use-1h", action="store_true",
+                    help="Use 1h mentor_cache data instead of 15m (no collection needed)")
     ap.add_argument("--out", type=str, default=None)
     args = ap.parse_args()
 
+    # In 1h mode, apply sensible defaults if user didn't override
+    if args.use_1h:
+        if args.tp == 1.8:
+            args.tp = 3.5
+        if args.sl == 1.2:
+            args.sl = 2.0
+        if args.max_hold_h == 8.0:
+            args.max_hold_h = 48.0
+        if args.cooldown == 30:
+            args.cooldown = 240
+
     if args.sweep:
-        sweep(args.days, args.initial, args.fee, args.slippage_bps)
+        sweep(args.days, args.initial, args.fee, args.slippage_bps, use_1h=args.use_1h)
         return
 
     result = run_backtest(
         args.days, args.initial, args.fee, args.slippage_bps,
         tp_pct=args.tp, sl_pct=args.sl,
         max_hold_h=args.max_hold_h, cooldown_min=args.cooldown,
+        use_1h=args.use_1h,
     )
     print(json.dumps(result, indent=2))
 

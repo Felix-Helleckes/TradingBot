@@ -88,6 +88,12 @@ def fetch_ohlc_15m(pair: str, since: int, end_ts: int) -> dict:
 
         if new_rows == 0:
             break
+        # Stop when last bar is within one candle of the end of our window
+        # (prevents infinite loop at the current-time boundary)
+        if last_ts >= end_ts - INTERVAL * 60:
+            break
+        if current >= end_ts:
+            break
 
         time.sleep(0.5)  # be polite to Kraken API
 
