@@ -11,6 +11,20 @@ LOCKFILE="/tmp/autosim_main.lock"
 
 mkdir -p "$OUT_DIR"
 
+# Stale-lock detection: if lockfile is older than 7 hours, the previous run
+# either crashed or was OOM-killed while holding the lock. Remove it so this
+# run is not silently blocked forever.
+STALE_LOCK_AGE_SECONDS=25200  # 7 hours
+if [ -f "$LOCKFILE" ]; then
+  lock_mtime=$(stat -c %Y "$LOCKFILE" 2>/dev/null || stat -f %m "$LOCKFILE" 2>/dev/null || echo 0)
+  now_ts=$(date +%s)
+  lock_age=$((now_ts - lock_mtime))
+  if [ "$lock_age" -gt "$STALE_LOCK_AGE_SECONDS" ]; then
+    echo "[$(date -Iseconds)] WARNING: stale lockfile ($lock_age s old) removed" | tee -a "$LOG"
+    rm -f "$LOCKFILE"
+  fi
+fi
+
 # Prevent parallel runs
 exec 200>"$LOCKFILE" || { echo "Cannot open lockfile $LOCKFILE"; exit 1; }
 flock -n 200 || { echo "Autosim already running; exiting"; exit 0; }
@@ -77,8 +91,32 @@ run_backtest(){
   fi
 }
 
+# Check Raspberry Pi CPU temperature. Abort backtest if the Pi is throttling
+# (>65 °C) to avoid a 6-hour backtest run that takes 12+ hours and overlaps the
+# next scheduled cycle.
+check_thermal(){
+  local TEMP_FILE="/sys/class/thermal/thermal_zone0/temp"
+  if [ ! -f "$TEMP_FILE" ]; then
+    return 0  # Not a Pi or temp not readable; continue
+  fi
+  local temp_raw
+  temp_raw=$(cat "$TEMP_FILE" 2>/dev/null || echo 0)
+  local temp_c=$(( temp_raw / 1000 ))
+  log "Pi CPU temperature: ${temp_c}°C"
+  if [ "$temp_c" -ge 65 ]; then
+    log "THERMAL GUARD: CPU is ${temp_c}°C (>= 65°C). Skipping backtest cycle to prevent throttled run."
+    return 1
+  fi
+  return 0
+}
+
 main(){
   log "Autosim Cycle START"
+
+  # Abort early if Pi is thermally throttled
+  if ! check_thermal; then
+    exit 0
+  fi
   
   # Ensure NAS is mounted (retry on failure)
   if ! mountpoint -q "/home/felix/mnt_nas_v2"; then

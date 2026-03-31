@@ -11,7 +11,7 @@ import numpy as np
 import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
-CACHE_DIR = Path("data/ohlc_cache")
+CACHE_DIR = Path("data/mentor_cache_1h")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -29,7 +29,12 @@ DEV = Profile("dev", slip=0.0002, score_gate=24, cooldown_sec=4200)
 
 
 def fetch_ohlc_1h(pair: str, start_ts: int, end_ts: int) -> Dict[int, float]:
+    # Prefer exact match, then fall back to any cached file for this pair (60m suffix)
     cache_path = CACHE_DIR / f"{pair}_{start_ts}_{end_ts}_1h.json"
+    if not cache_path.exists():
+        candidates = sorted(CACHE_DIR.glob(f"{pair}_*_60m.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if candidates:
+            cache_path = candidates[0]
     if cache_path.exists():
         return {int(k): float(v) for k, v in json.loads(cache_path.read_text()).items()}
 

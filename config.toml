@@ -12,21 +12,17 @@ auto_select_pair = true
 
 # Kraken-normalized EUR pairs (altname format preferred)
 trade_pairs = [
-    "XXBTZEUR",  # Bitcoin
     "XETHZEUR",  # Ethereum
     "SOLEUR",    # Solana
-    "ADAEUR",    # Cardano
-    "DOTEUR",    # Polkadot
+    "ADAEUR",    # Cardano  (+best backtest: +1.92€)
     "XXRPZEUR",  # Ripple
     "LINKEUR"    # Chainlink
 ]
 
 [bot_settings.min_volumes]
-XXBTZEUR = 0.0001
 XETHZEUR = 0.001
 SOLEUR = 0.02
 ADAEUR = 5.0
-DOTEUR = 0.2
 XXRPZEUR = 5.0
 LINKEUR = 0.2
 
@@ -40,13 +36,21 @@ max_drawdown_percent = 10.0
 stop_loss_percent = 2.0
 # dynamic sizing uses this % of available EUR, capped by trade_amount_eur
 allocation_per_trade_percent = 20.0
-# Entry quality filter: lowered for faster re-entry after risk-off phases
-min_buy_score = 14.0
+# Entry quality filter: lowered to match backtest reversion_bias score_gate=8
+min_buy_score = 8.0
+
+# Signal engine mode (reversion_bias variant showed best risk/return balance)
+# Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
+# Trend/breakout: buy Bollinger Band upward breakout
+enable_mean_reversion_signals = true
+enable_trend_breakout_signals = false
+mr_rsi_oversold_threshold = 33
+mr_rsi_overbought_threshold = 67
 
 # Mentor v2 hardening (single auto-bot; no manual mode switching)
 enable_regime_filter = true
 regime_benchmark_pair = "XBTEUR"
-regime_min_score = -12.0
+regime_min_score = -10.0
 enable_mtf_regime_scoring = true
 mtf_regime_min_score = -2.0
 # Do not auto-sell at a loss: disable hard stop loss
@@ -70,7 +74,8 @@ time_stop_hours = 72
 # Aggressive autonomy: disable daily drawdown cutoff and favor full allocation
 enable_daily_drawdown = false
 daily_loss_limit_percent = 90.0
-risk_off_allocation_multiplier = 0.60
+# Risk-off sizing: reversion_bias uses 0.50 (vs 0.60 baseline)
+risk_off_allocation_multiplier = 0.50
 enable_volatility_targeting = true
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
@@ -80,13 +85,23 @@ take_profit_percent = 3.0
 adaptive_take_profit = true
 max_take_profit_percent = 7.0
 # Small buffer to cover fees (percent added to required TP)
-sell_fee_buffer_percent = 0.30
+# Kraken maker=0.16% entry + taker=0.26% exit = 0.42% minimum; use 0.45% for safety
+sell_fee_buffer_percent = 0.45
+
+# Conservative slippage deduction applied to exit price before TP check (percent)
+# Accounts for thin order books and taker spread on the exit side
+exit_slippage_buffer_pct = 0.30
 
 # ATR stop settings (adaptive stop based on recent volatility)
 enable_atr_stop = true
 atr_period = 14
 atr_multiplier = 1.5
 atr_trail_multiplier = 2.0
+# ATR dynamic take-profit: floor = atr_tp_multiplier × ATR% (prevents exits before capturing the expected move)
+# With atr_tp_multiplier=2.0 and typical 1h ATR ~1.5% for crypto, effective floor ~ 3% (matches base TP)
+# In low-volatility regimes ATR% < 1.5% → floor stays at take_profit_percent; in high-vol ATR 2.5% → floor 5%
+enable_atr_dynamic_tp = true
+atr_tp_multiplier = 2.0
 
 # Pyramiding (add-to-winner) - disabled by default
 enable_pyramiding = false
@@ -94,8 +109,10 @@ pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = 
 
 # Execution/risk guards
 max_open_positions = 7
-trade_cooldown_seconds = 240
-global_trade_cooldown_seconds = 360
+# Cooldowns tuned to reversion_bias: 60min per-pair, 90min global
+# Fewer trades = lower fee drag, matches 43 trades/year vs 154 for main_baseline
+trade_cooldown_seconds = 3600
+global_trade_cooldown_seconds = 5400
 # Suppress repeated empty SELL logs per pair (seconds)
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0
@@ -117,6 +134,26 @@ aggressive_autoscale = true
 # Dynamic notional scaling factor (fraction of equity to allow per side)
 dynamic_notional_fraction = 0.4
 
+# ── Daytrading mode ──────────────────────────────────────────────────────────
+# When enable_daytrading = true, the bot uses intraday parameters:
+#   • max hold time 12h (force-exit at EOD-ish)
+#   • tighter SL to keep per-trade risk small
+#   • shorter cooldowns so more signals are processed per day
+#   • lower base TP target (1-3% moves are intraday-achievable on 1h crypto)
+[daytrading]
+enable_daytrading = false
+# Exit any open position after this many hours regardless of P&L (force flat)
+max_hold_hours = 12
+# Intraday hard stop-loss (tighter than swing-trade SL)
+intraday_sl_percent = 1.5
+# Intraday base TP target (ATR-dynamic will raise this in volatile markets)
+intraday_tp_percent = 1.8
+# Per-pair cooldown for daytrading (seconds). 30 min = can trade twice a session
+intraday_cooldown_seconds = 1800
+# After N consecutive losses, pause for X minutes and then reset
+max_consecutive_losses = 2
+loss_streak_pause_minutes = 30
+
 [shorting]
 enabled = true
 leverage = "2"
@@ -135,6 +172,9 @@ results_output_path = "backtest_results/"
 [reporting]
 generate_trade_reports = true
 report_output_path = "reports/"
+# How often (seconds) to re-read EUR deposits/withdrawals from Kraken ledger.
+# 60s means a new deposit is visible to the bot within 1 minute.
+cashflow_refresh_seconds = 60
 
 [execution]
 # Live execution options

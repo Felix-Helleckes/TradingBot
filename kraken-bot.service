@@ -1,6 +1,7 @@
 [Unit]
 Description=Kraken Trading Bot
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -9,7 +10,19 @@ WorkingDirectory=/home/felix/TradingBot
 
 ExecStart=/home/felix/TradingBot/venv/bin/python /home/felix/TradingBot/main.py
 Restart=always
-RestartSec=10
+# Longer restart delay avoids CPU-thrashing when Kraken API is down
+RestartSec=30
+
+# Raspberry Pi resource protection:
+# Bot process is protected from OOM-killer (low score = protected)
+OOMScoreAdj=-100
+# Hard memory limit; prevents slow memory leaks from consuming all Pi RAM
+MemoryMax=400M
+# Forward stdout/stderr to journald for easy access via: journalctl -u kraken-bot -f
+StandardOutput=journal
+StandardError=journal
+# Weekly restart to clear any accumulated memory fragmentation
+RuntimeMaxSec=604800
 
 [Install]
 WantedBy=multi-user.target

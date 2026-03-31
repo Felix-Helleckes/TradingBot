@@ -22,6 +22,36 @@ class KrakenAPI:
             return True
         return False
 
+    def _is_rate_limit_error(self, response):
+        """Return True if the Kraken response indicates a rate-limit error."""
+        errs = response.get('error', [])
+        if isinstance(errs, str):
+            errs = [errs]
+        return any('Rate limit' in str(e) or 'EAPI:Rate limit' in str(e) for e in errs)
+
+    def _query_public_with_backoff(self, endpoint, params=None, retries=4):
+        """Query a public Kraken endpoint with exponential backoff on rate-limit errors."""
+        params = params or {}
+        last_error = None
+        for attempt in range(retries):
+            delay = self.rate_limit_delay * (2 ** attempt)
+            time.sleep(delay)
+            try:
+                response = self.api.query_public(endpoint, params)
+                if self._is_rate_limit_error(response):
+                    last_error = response.get('error')
+                    self.logger.warning(
+                        f"{endpoint} rate-limited (attempt {attempt + 1}/{retries}), "
+                        f"backing off {delay:.1f}s …"
+                    )
+                    continue
+                return response
+            except Exception as e:
+                self.logger.exception(f"Exception in {endpoint} attempt {attempt + 1}: {e}")
+                return None
+        self.logger.error(f"{endpoint} failed after {retries} retries due to rate limit: {last_error}")
+        return None
+
     def get_account_balance(self):
         try:
             response = self.api.query_private('Balance')
@@ -34,8 +64,9 @@ class KrakenAPI:
 
     def get_market_data(self, pair):
         try:
-            time.sleep(self.rate_limit_delay)
-            response = self.api.query_public('Ticker', {'pair': pair})
+            response = self._query_public_with_backoff('Ticker', {'pair': pair})
+            if response is None:
+                return None
             if self._handle_error(response, f"Market Data for {pair}"):
                 return None
             return response.get('result', {})
@@ -51,8 +82,9 @@ class KrakenAPI:
             params = {'pair': pair, 'interval': interval}
             if since:
                 params['since'] = since
-            time.sleep(self.rate_limit_delay)
-            response = self.api.query_public('OHLC', params)
+            response = self._query_public_with_backoff('OHLC', params)
+            if response is None:
+                return None
             if self._handle_error(response, f"OHLC Data for {pair}"):
                 return None
             return response.get('result', {})
@@ -63,8 +95,9 @@ class KrakenAPI:
     def get_asset_pairs(self):
         """Fetch tradable asset pairs from Kraken."""
         try:
-            time.sleep(self.rate_limit_delay)
-            response = self.api.query_public('AssetPairs')
+            response = self._query_public_with_backoff('AssetPairs')
+            if response is None:
+                return {}
             if self._handle_error(response, "AssetPairs Query"):
                 return {}
             return response.get('result', {})

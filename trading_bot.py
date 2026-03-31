@@ -17,6 +17,16 @@ class TradingBot:
 
         self.analysis_tool = TechnicalAnalysis(rsi_period=14, sma_short=20, sma_long=50)
 
+        # Signal engine mode: mean-reversion (reversion_bias) and/or trend/breakout (BB)
+        self.enable_mr_signals = bool(self.config.get('risk_management', {}).get('enable_mean_reversion_signals', True))
+        self.enable_trend_signals = bool(self.config.get('risk_management', {}).get('enable_trend_breakout_signals', True))
+        self.mr_rsi_oversold = float(self.config.get('risk_management', {}).get('mr_rsi_oversold_threshold', 33.0))
+        self.mr_rsi_overbought = float(self.config.get('risk_management', {}).get('mr_rsi_overbought_threshold', 67.0))
+        self.analysis_tool.enable_mr_signals = self.enable_mr_signals
+        self.analysis_tool.enable_trend_signals = self.enable_trend_signals
+        self.analysis_tool.mr_rsi_buy = self.mr_rsi_oversold
+        self.analysis_tool.mr_rsi_sell = self.mr_rsi_overbought
+
         self.trade_pairs = self.config['bot_settings'].get('trade_pairs', ['XBTEUR'])
         self.pair_signals = {}
         self.pair_prices = {}
@@ -66,6 +76,9 @@ class TradingBot:
         self.atr_period = int(self.config.get('risk_management', {}).get('atr_period', 14))
         self.atr_multiplier = float(self.config.get('risk_management', {}).get('atr_multiplier', 1.5))
         self.atr_trail_multiplier = float(self.config.get('risk_management', {}).get('atr_trail_multiplier', 0.75))
+        # ATR dynamic take-profit: TP floor = atr_tp_multiplier × ATR%
+        self.enable_atr_dynamic_tp = bool(self.config.get('risk_management', {}).get('enable_atr_dynamic_tp', False))
+        self.atr_tp_multiplier = float(self.config.get('risk_management', {}).get('atr_tp_multiplier', 2.0))
         
         # Break-even stop-loss
         self.enable_break_even = bool(self.config.get('risk_management', {}).get('enable_break_even', True))
@@ -111,6 +124,12 @@ class TradingBot:
         self.net_withdrawals_eur = 0.0
         self._last_cashflow_refresh_ts = 0
         self.cashflow_refresh_interval_sec = int(self.config.get('reporting', {}).get('cashflow_refresh_seconds', 600))
+        if self.cashflow_refresh_interval_sec > 300:
+            self.logger.warning(
+                f"cashflow_refresh_seconds is {self.cashflow_refresh_interval_sec}s (>5m). "
+                f"Deposits/withdrawals may not be reflected for up to {self.cashflow_refresh_interval_sec}s. "
+                f"Consider setting cashflow_refresh_seconds = 60 in config.toml [reporting]."
+            )
         self.last_daily_reset_ts = int(time.time())
 
         self.valid_pairs = self._fetch_valid_trade_pairs(self.trade_pairs)
@@ -176,9 +195,15 @@ class TradingBot:
         try:
             if not os.path.exists(self.news_marquee_path):
                 return False
-            import re
+            import re, fcntl
             with open(self.news_marquee_path, 'r') as f:
-                content = f.read().lower()
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    content = f.read().lower()
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                except (OSError, BlockingIOError):
+                    # File is being written to; skip this cycle safely
+                    return self.sentiment_active  # Keep previous state
             # Use word boundaries to avoid false positives (like 'sec' in 'secretary')
             found = [k for k in self.sentiment_pause_keywords if re.search(r'\b' + re.escape(k) + r'\b', content)]
             if found:
@@ -353,11 +378,17 @@ class TradingBot:
             if not new_config:
                 return False
 
-            old_pairs = self.trade_pairs
+            old_pairs = set(self.trade_pairs)
             self.config = new_config
             requested = self.config['bot_settings'].get('trade_pairs', ['XBTEUR'])
             self.trade_pairs = self._fetch_valid_trade_pairs(requested)
-            self._init_pair_state(self.trade_pairs)
+            new_pairs = set(self.trade_pairs)
+            # Only initialise state for truly NEW pairs; preserve holdings/entry-prices for existing ones
+            added_pairs = list(new_pairs - old_pairs)
+            if added_pairs:
+                self._init_pair_state(added_pairs)
+            # Immediately reconcile live state so no stale holdings data lingers
+            self._sync_account_state()
 
             self.target_balance_eur = self._get_target_balance()
             self.take_profit_percent = self._get_take_profit_percent()
@@ -385,19 +416,29 @@ class TradingBot:
             self.pause_after_loss_streak_minutes = int(self.config.get('risk_management', {}).get('pause_after_loss_streak_minutes', self.pause_after_loss_streak_minutes))
             self.sell_fee_buffer_percent = float(self.config.get('risk_management', {}).get('sell_fee_buffer_percent', self.sell_fee_buffer_percent))
             self.enable_sentiment_guard = bool(self.config.get('risk_management', {}).get('enable_sentiment_guard', self.enable_sentiment_guard))
+            # Signal engine mode reload
+            self.enable_mr_signals = bool(self.config.get('risk_management', {}).get('enable_mean_reversion_signals', self.enable_mr_signals))
+            self.enable_trend_signals = bool(self.config.get('risk_management', {}).get('enable_trend_breakout_signals', self.enable_trend_signals))
+            self.mr_rsi_oversold = float(self.config.get('risk_management', {}).get('mr_rsi_oversold_threshold', self.mr_rsi_oversold))
+            self.mr_rsi_overbought = float(self.config.get('risk_management', {}).get('mr_rsi_overbought_threshold', self.mr_rsi_overbought))
+            self.analysis_tool.enable_mr_signals = self.enable_mr_signals
+            self.analysis_tool.enable_trend_signals = self.enable_trend_signals
+            self.analysis_tool.mr_rsi_buy = self.mr_rsi_oversold
+            self.analysis_tool.mr_rsi_sell = self.mr_rsi_overbought
             # ATR + pyramiding reload
             self.enable_atr_stop = bool(self.config.get('risk_management', {}).get('enable_atr_stop', self.enable_atr_stop))
             self.atr_period = int(self.config.get('risk_management', {}).get('atr_period', self.atr_period))
             self.atr_multiplier = float(self.config.get('risk_management', {}).get('atr_multiplier', self.atr_multiplier))
             self.atr_trail_multiplier = float(self.config.get('risk_management', {}).get('atr_trail_multiplier', self.atr_trail_multiplier))
+            self.enable_atr_dynamic_tp = bool(self.config.get('risk_management', {}).get('enable_atr_dynamic_tp', self.enable_atr_dynamic_tp))
+            self.atr_tp_multiplier = float(self.config.get('risk_management', {}).get('atr_tp_multiplier', self.atr_tp_multiplier))
             self.enable_break_even = bool(self.config.get('risk_management', {}).get('enable_break_even', self.enable_break_even))
             self.break_even_trigger_pct = float(self.config.get('risk_management', {}).get('break_even_trigger_percent', self.break_even_trigger_pct))
             self.enable_pyramiding = bool(self.config.get('risk_management', {}).get('enable_pyramiding', self.enable_pyramiding))
             self.pyramiding_add_pct = float(self.config.get('risk_management', {}).get('pyramiding_add_pct', self.pyramiding_add_pct))
 
-            if set(old_pairs) != set(self.trade_pairs):
-                self.logger.info(f"CONFIG RELOAD: trade_pairs changed {old_pairs} -> {self.trade_pairs}")
-                print(f"\n[CONFIG] Trade pairs updated: {self.trade_pairs}")
+            if old_pairs != new_pairs:
+                self.logger.info(f"CONFIG RELOAD: trade_pairs changed {sorted(old_pairs)} -> {sorted(new_pairs)}")
 
             self.last_config_reload = datetime.now()
             return True
@@ -439,6 +480,58 @@ class TradingBot:
                 self.holdings[pair] = float(balance.get(key, 0))
         except Exception as e:
             self.logger.error(f"Error getting holdings: {e}")
+
+    def _reconcile_open_orders(self):
+        """Compare open orders on Kraken with local position state at startup.
+
+        Detects 'orphaned' orders that exist on Kraken but are not reflected
+        locally (e.g. bot died between placing an order and updating state).
+        Logs a warning so the operator can decide to cancel manually if needed.
+        """
+        try:
+            open_orders_result = self.api_client.get_open_orders()
+            if not open_orders_result:
+                return
+            open_map = open_orders_result.get('open', open_orders_result) if isinstance(open_orders_result, dict) else {}
+            if not open_map:
+                return
+
+            watched = set(self.trade_pairs)
+            # Build alias map so we can match Kraken pair names to our normalised pairs
+            pair_aliases = {
+                'XXBTZEUR': 'XBTEUR', 'XBTEUR': 'XBTEUR',
+                'XETHZEUR': 'ETHEUR', 'ETHEUR': 'ETHEUR',
+                'SOLEUR': 'SOLEUR', 'ADAEUR': 'ADAEUR',
+                'DOTEUR': 'DOTEUR',
+                'XXRPZEUR': 'XRPEUR', 'XRPEUR': 'XRPEUR',
+                'LINKEUR': 'LINKEUR',
+            }
+
+            for txid, order in open_map.items():
+                raw_pair = str(order.get('descr', {}).get('pair', '') or order.get('pair', '')).upper()
+                norm_pair = pair_aliases.get(raw_pair, raw_pair)
+                if norm_pair not in watched:
+                    continue
+                side = str(order.get('descr', {}).get('type', '') or '').lower()
+                vol = float(order.get('vol', 0) or 0)
+                local_holding = self.holdings.get(norm_pair, 0.0)
+                local_short = self.short_qty.get(norm_pair, 0.0)
+
+                # Check for mismatches
+                if side == 'buy' and local_holding < self._get_min_volume(norm_pair):
+                    self.logger.warning(
+                        f"RECONCILE: Open BUY order {txid} ({vol:.6f} {norm_pair}) exists on Kraken "
+                        f"but local holdings={local_holding:.8f}. Bot may have crashed before state update."
+                    )
+                elif side == 'sell' and local_short <= 0 and local_holding < self._get_min_volume(norm_pair):
+                    self.logger.warning(
+                        f"RECONCILE: Open SELL order {txid} ({vol:.6f} {norm_pair}) exists on Kraken "
+                        f"but no local long/short position found."
+                    )
+
+            self.logger.info(f"Order reconciliation complete. {len(open_map)} open order(s) checked.")
+        except Exception as e:
+            self.logger.error(f"Order reconciliation failed: {e}", exc_info=True)
 
     def _sync_account_state(self):
         self.get_crypto_holdings()
@@ -530,12 +623,24 @@ class TradingBot:
             for pair in watched:
                 live_qty = self.holdings.get(pair, 0.0)
                 self.position_qty[pair] = live_qty
-                if live_qty <= self._get_min_volume(pair):
+                min_vol = self._get_min_volume(pair)
+                # Use a small grace margin (5%) so a position at exactly min_volume
+                # is NOT treated as empty and does not lose its entry price.
+                if live_qty < min_vol * 0.95:
                     self.purchase_prices[pair] = 0.0
                     self.peak_prices[pair] = 0.0
                     self.entry_timestamps[pair] = None
-                elif self.entry_timestamps.get(pair) is None:
-                    self.entry_timestamps[pair] = int(time.time())
+                elif self.purchase_prices.get(pair, 0.0) <= 0.0:
+                    # Position exists but entry price is unknown (e.g. after a crash-restart)
+                    self.logger.warning(
+                        f"Position {pair} exists ({live_qty:.8f}) but entry price is unknown! "
+                        f"TP/SL calculations may be inaccurate until next history replay."
+                    )
+                    if self.entry_timestamps.get(pair) is None:
+                        self.entry_timestamps[pair] = int(time.time())
+                else:
+                    if self.entry_timestamps.get(pair) is None:
+                        self.entry_timestamps[pair] = int(time.time())
 
         except Exception as e:
             self.logger.error(f"Error loading last purchase prices: {e}")
@@ -751,10 +856,23 @@ class TradingBot:
             return None
 
     def _required_take_profit_percent(self, pair):
-        """Adaptive TP: in stronger momentum, demand a bit more profit before selling."""
+        """Adaptive TP: in stronger momentum, demand a bit more profit before selling.
+        When enable_atr_dynamic_tp is on, the TP floor is raised to atr_tp_multiplier × ATR%
+        so the bot doesn't exit on small wiggles in volatile markets.
+        """
         base_tp = self.take_profit_percent
+
+        # ATR-based dynamic floor: require at least atr_tp_multiplier × ATR% profit
+        if self.enable_atr_dynamic_tp:
+            atr = self._compute_atr(pair)
+            current_price = self.pair_prices.get(pair, 0)
+            if atr and current_price > 0:
+                atr_pct = (atr / current_price) * 100.0
+                base_tp = max(base_tp, self.atr_tp_multiplier * atr_pct)
+
         if not self.adaptive_tp_enabled:
-            return base_tp
+            fee_buffer = float(self.sell_fee_buffer_percent or 0.0)
+            return min(self.max_tp_percent, base_tp + fee_buffer)
 
         score = abs(float(self.pair_scores.get(pair, 0.0)))
         # Map score band [20..50] -> +0..+4%
@@ -767,10 +885,24 @@ class TradingBot:
         return min(self.max_tp_percent, base_tp + bonus + fee_buffer)
 
     def _can_sell_profit_target(self, pair, current_price):
-        """Only allow sell when current price is at/above configured take-profit threshold from entry."""
-        if self.enable_atr_stop:
-            return True # Let winners run via trail; allow indicator-based exits without profit barrier
-        profit_pct = self._profit_percent_from_entry(pair, current_price)
+        """Only allow sell when current price is at/above configured take-profit threshold from entry.
+
+        Applies a conservative 0.3% slippage buffer: we assume the actual fill
+        will be slightly worse than the current mid-price (thin order books,
+        taker fees on exit). This ensures the TP check is not fooled by a single
+        tick that will never actually fill at that exact price.
+
+        When enable_atr_dynamic_tp is active, the ATR-based TP floor is enforced
+        even when the ATR trailing stop is running (prevents indicator exits before
+        capturing the minimum expected move).
+        """
+        # With ATR trailing stop but WITHOUT dynamic TP: no indicator profit gate needed
+        if self.enable_atr_stop and not self.enable_atr_dynamic_tp:
+            return True  # Let winners run via trail; allow indicator-based exits without profit barrier
+        # Conservative exit price accounting for slippage/spread
+        slippage_pct = float(self.config.get('risk_management', {}).get('exit_slippage_buffer_pct', 0.3))
+        conservative_exit_price = current_price * (1.0 - slippage_pct / 100.0)
+        profit_pct = self._profit_percent_from_entry(pair, conservative_exit_price)
         if profit_pct is None:
             return False
         return profit_pct >= self._required_take_profit_percent(pair)
@@ -784,6 +916,10 @@ class TradingBot:
         if pnl_eur >= 0:
             m["wins"] += 1
             self.consecutive_losses = 0
+            # A winning trade ends any active loss-streak pause immediately
+            if self.trading_paused_until_ts > time.time():
+                self.logger.info("Loss-streak pause lifted early after winning trade")
+                self.trading_paused_until_ts = 0
         else:
             m["losses"] += 1
             self.consecutive_losses += 1
@@ -964,6 +1100,7 @@ class TradingBot:
         self.peak_balance = initial_balance
         self.daily_start_balance = initial_balance
         self._sync_account_state()
+        self._reconcile_open_orders()  # Detect orphaned orders from any previous crash
         self._refresh_cashflows_from_ledger(force=True)
 
         self.logger.info(f"Initial EUR Balance: {initial_balance:.2f} EUR")

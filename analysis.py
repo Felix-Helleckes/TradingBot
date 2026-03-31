@@ -22,6 +22,11 @@ class TechnicalAnalysis:
         self.pair_price_history = {}
         self.max_history = max(rsi_period + 2, sma_long + 5)
         self.buffer_path = os.path.join(os.path.dirname(__file__), 'data', 'history_buffer.json')
+        # Signal engine mode flags (pushed from TradingBot after config load)
+        self.enable_mr_signals = True    # mean-reversion: RSI oversold/overbought
+        self.enable_trend_signals = True # trend/breakout: Bollinger Band momentum
+        self.mr_rsi_buy = 33.0           # RSI <= threshold triggers mean-reversion BUY
+        self.mr_rsi_sell = 67.0          # RSI >= threshold triggers mean-reversion SELL
         self._load_history()
 
     def _get_price_history(self, pair):
@@ -41,11 +46,23 @@ class TechnicalAnalysis:
             self.logger.error(f"Error loading price history buffer: {e}")
 
     def _save_history(self):
+        """Atomically write price history so a crash/power-loss never leaves a corrupted file."""
         try:
+            import tempfile
             os.makedirs(os.path.dirname(self.buffer_path), exist_ok=True)
             data = {pair: list(prices) for pair, prices in self.pair_price_history.items()}
-            with open(self.buffer_path, 'w') as f:
-                json.dump(data, f)
+            dir_path = os.path.dirname(self.buffer_path)
+            fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix='.tmp')
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(data, f)
+                os.replace(tmp_path, self.buffer_path)  # atomic on POSIX
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             self.logger.error(f"Error saving price history buffer: {e}")
 
@@ -121,19 +138,49 @@ class TechnicalAnalysis:
             signal = "HOLD"
             score = 0.0
 
-            if current_price > upper_bb:
-                # Bullish Breakout
-                if current_price > sma50:
-                    signal = "BUY"
-                    breakout_pct = ((current_price - upper_bb) / upper_bb) * 100
-                    score = 25.0 + (breakout_pct * 50.0)
+            # RSI confirmation (used by both signal paths)
+            rsi_confirm = self.calculate_rsi(list(price_history)[-20:]) if len(price_history) >= 20 else None
+            rsi_full = self.calculate_rsi(list(price_history)) if len(price_history) >= self.rsi_period + 1 else None
+            sma_ratio = (sma20 - sma50) / sma50 if sma50 > 0 else 0.0
 
-            elif current_price < lower_bb:
-                # Bearish Breakout
-                if current_price < sma50:
+            # --- Mean-reversion signal path (reversion_bias variant) ---
+            # Buy extreme RSI oversold when not in strong downtrend; sell RSI overbought
+            if self.enable_mr_signals and rsi_full is not None:
+                rsi_s = 0.0
+                if rsi_full < 30:
+                    rsi_s = (30 - rsi_full) / 30 * 50
+                elif rsi_full > 70:
+                    rsi_s = -((rsi_full - 70) / 30 * 50)
+                sma_s = max(-50.0, min(50.0, sma_ratio * 100 * 10))
+                mr_score = rsi_s + sma_s
+                if rsi_full <= self.mr_rsi_buy and sma_ratio > -0.003:
+                    signal = "BUY"
+                    score = mr_score
+                elif rsi_full >= self.mr_rsi_sell and sma_ratio < 0.003:
                     signal = "SELL"
-                    breakout_pct = ((lower_bb - current_price) / lower_bb) * 100
-                    score = -25.0 - (breakout_pct * 50.0)
+                    score = mr_score
+
+            # --- Trend/breakout signal path (Bollinger Band momentum) ---
+            # Only overrides MR signal if trend signal is stronger
+            if self.enable_trend_signals:
+                if current_price > upper_bb:
+                    # Bullish Breakout: require RSI >= 55 to confirm momentum
+                    if current_price > sma50 and (rsi_confirm is None or rsi_confirm >= 55):
+                        trend_score = min(50.0, 25.0 + (((current_price - upper_bb) / upper_bb) * 100 * 50.0))
+                        if trend_score > score:
+                            signal = "BUY"
+                            score = trend_score
+                    elif current_price > sma50 and score == 0.0:
+                        score = 8.0  # weak, no signal override
+                elif current_price < lower_bb:
+                    # Bearish Breakout: require RSI <= 45 to confirm downward momentum
+                    if current_price < sma50 and (rsi_confirm is None or rsi_confirm <= 45):
+                        trend_score = max(-50.0, -25.0 - (((lower_bb - current_price) / lower_bb) * 100 * 50.0))
+                        if trend_score < score:
+                            signal = "SELL"
+                            score = trend_score
+                    elif current_price < sma50 and score == 0.0:
+                        score = -8.0  # weak, no signal override
 
             # Cap score
             score = max(-50.0, min(50.0, score))
