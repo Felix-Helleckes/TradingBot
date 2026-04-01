@@ -68,7 +68,14 @@ PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
 CACHE_DIR = Path("data/ohlc_cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 MENTOR_CACHE_DIR = Path("data/mentor_cache_1h")
-LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", "/home/felix/mnt_nas/Volume/kraken_research_data"))
+
+# NAS path: Linux (Pi) uses /home/felix/mnt_nas, macOS uses /Volumes/FRITZ.NAS
+_NAS_DEFAULT = (
+    "/Volumes/FRITZ.NAS/Volume/kraken_research_data"
+    if Path("/Volumes/FRITZ.NAS").exists()
+    else "/home/felix/mnt_nas/Volume/kraken_research_data"
+)
+LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", _NAS_DEFAULT))
 USE_LOCAL_TS = os.getenv("USE_LOCAL_TS", "1") == "1"
 
 

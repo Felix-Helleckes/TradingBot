@@ -51,6 +51,13 @@ reports/
 backtest_results/
 *.csv
 
+# Runtime data caches — stored on NAS, not in repo
+data/
+sim_output/
+
+# Temp research scripts
+scripts/_tmp_*.py
+
 # OS Files
 .DS_Store
 Thumbs.db
