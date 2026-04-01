@@ -154,6 +154,23 @@ intraday_cooldown_seconds = 1800
 max_consecutive_losses = 2
 loss_streak_pause_minutes = 30
 
+# ── Bear Shield ──────────────────────────────────────────────────────────────
+# When enabled: if price stays below EMA(ema_period) on the 4h chart for
+# bear_confirm_candles consecutive 4h candles, the bot:
+#   1. Skips all new BUY orders (stays in FIAT)
+#   2. Sells ALL open positions at market (park everything in EUR)
+# Bull re-entry is allowed only when price closes above EMA again.
+[bear_shield]
+enable_bear_shield = true
+# EMA period on 4h data to define trend (50 = ~8 days)
+bear_ema_period = 50
+# How many consecutive 4h candles must close below EMA before triggering
+bear_confirm_candles = 3
+# Benchmark pair to measure trend on (usually your best-liquidity pair)
+bear_benchmark_pair = "XETHZEUR"
+# Log a message every N minutes when in bear mode (0 = only on state change)
+bear_log_interval_minutes = 60
+
 [shorting]
 enabled = true
 leverage = "2"

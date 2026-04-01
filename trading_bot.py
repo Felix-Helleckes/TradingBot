@@ -147,6 +147,16 @@ class TradingBot:
         self.sentiment_pause_keywords = ["crash", "hack", "dump", "sec", "lawsuit", "regulation", "ban"]
         self.sentiment_active = False
 
+        # Bear Shield: auto-park in FIAT during confirmed downtrends
+        bear_cfg = self.config.get('bear_shield', {})
+        self.enable_bear_shield = bool(bear_cfg.get('enable_bear_shield', False))
+        self.bear_ema_period = int(bear_cfg.get('bear_ema_period', 50))
+        self.bear_confirm_candles = int(bear_cfg.get('bear_confirm_candles', 3))
+        self.bear_benchmark_pair = str(bear_cfg.get('bear_benchmark_pair', 'XETHZEUR')).upper()
+        self.bear_log_interval_minutes = int(bear_cfg.get('bear_log_interval_minutes', 60))
+        self._bear_mode_active = False          # current state
+        self._bear_last_log_ts = 0              # throttle logging
+
     def _notify_pause(self, reason):
         """Log and attempt to notify an external channel when a trading pause activates."""
         try:
@@ -170,6 +180,67 @@ class TradingBot:
                     pass
         except Exception:
             pass
+
+    # ── Bear Shield ───────────────────────────────────────────────────────────
+
+    def _calc_ema(self, prices, period):
+        """Simple EMA calculation (no external dependencies)."""
+        if len(prices) < period:
+            return None
+        k = 2.0 / (period + 1)
+        ema = prices[0]
+        for p in prices[1:]:
+            ema = p * k + ema * (1 - k)
+        return ema
+
+    def _is_bear_market(self):
+        """Return True when the 4h trend has confirmed a downtrend for bear_confirm_candles.
+
+        Logic: fetch 4h OHLC for bear_benchmark_pair, compute EMA(bear_ema_period).
+               If the last bear_confirm_candles closes are ALL below EMA → bear mode.
+               If price crosses back above EMA → bull mode restored.
+        Fails safe: returns False (allow trading) if API call fails.
+        """
+        if not self.enable_bear_shield:
+            return False
+        try:
+            ohlc = self.api_client.get_ohlc_data(self.bear_benchmark_pair, interval=240)  # 4h
+            if not ohlc:
+                return False
+            key = [k for k in ohlc.keys() if k != 'last']
+            if not key:
+                return False
+            rows = ohlc[key[0]]
+            closes = [float(r[4]) for r in rows if r and len(r) >= 5]
+            if len(closes) < self.bear_ema_period + self.bear_confirm_candles:
+                return False
+
+            ema = self._calc_ema(closes[:-self.bear_confirm_candles], self.bear_ema_period)
+            if ema is None:
+                return False
+
+            # Check last N candles are all below EMA
+            last_n = closes[-self.bear_confirm_candles:]
+            return all(c < ema for c in last_n)
+        except Exception as e:
+            self.logger.debug(f"Bear shield check failed (safe fallback to False): {e}")
+            return False
+
+    def _bear_shield_exit_all(self):
+        """Sell all open long positions to park in FIAT (bear market escape)."""
+        sold_any = False
+        for pair in list(self.trade_pairs):
+            qty = self.holdings.get(pair, 0.0)
+            min_vol = self._get_min_volume(pair)
+            if qty >= min_vol:
+                price = self.pair_prices.get(pair, 0.0)
+                if price > 0:
+                    self.logger.warning(
+                        f"BEAR SHIELD: selling {qty:.6f} {pair} @ {price:.4f} EUR to park in FIAT"
+                    )
+                    self.execute_sell_order(pair, price)
+                    sold_any = True
+        return sold_any
 
     def _update_airbag_history(self, pair, price):
         now = time.time()
@@ -439,6 +510,14 @@ class TradingBot:
 
             if old_pairs != new_pairs:
                 self.logger.info(f"CONFIG RELOAD: trade_pairs changed {sorted(old_pairs)} -> {sorted(new_pairs)}")
+
+            # Bear Shield reload
+            bear_cfg = self.config.get('bear_shield', {})
+            self.enable_bear_shield = bool(bear_cfg.get('enable_bear_shield', self.enable_bear_shield))
+            self.bear_ema_period = int(bear_cfg.get('bear_ema_period', self.bear_ema_period))
+            self.bear_confirm_candles = int(bear_cfg.get('bear_confirm_candles', self.bear_confirm_candles))
+            self.bear_benchmark_pair = str(bear_cfg.get('bear_benchmark_pair', self.bear_benchmark_pair)).upper()
+            self.bear_log_interval_minutes = int(bear_cfg.get('bear_log_interval_minutes', self.bear_log_interval_minutes))
 
             self.last_config_reload = datetime.now()
             return True
@@ -1196,6 +1275,27 @@ class TradingBot:
                     if metric_parts:
                         self.logger.info("METRICS | " + " | ".join(metric_parts))
 
+                # ── Bear Shield: check 4h trend and park in FIAT if confirmed downtrend ──
+                if self.enable_bear_shield:
+                    bear_now = self._is_bear_market()
+                    if bear_now and not self._bear_mode_active:
+                        self.logger.warning(
+                            f"BEAR SHIELD ACTIVATED: {self.bear_benchmark_pair} below EMA{self.bear_ema_period} "
+                            f"on 4h for {self.bear_confirm_candles} candles — selling all positions, parking in EUR"
+                        )
+                        self._bear_mode_active = True
+                        self._bear_shield_exit_all()
+                    elif not bear_now and self._bear_mode_active:
+                        self.logger.info("BEAR SHIELD DEACTIVATED: trend turned bullish — resuming normal trading")
+                        self._bear_mode_active = False
+                    elif bear_now:
+                        now_ts = time.time()
+                        if (now_ts - self._bear_last_log_ts) >= self.bear_log_interval_minutes * 60:
+                            self.logger.info(
+                                f"BEAR SHIELD: still in bear mode ({self.bear_benchmark_pair} < EMA{self.bear_ema_period} on 4h)"
+                            )
+                            self._bear_last_log_ts = now_ts
+
                 if best_pair and best_signal != "HOLD" and not self._is_on_cooldown(best_pair) and not self._is_global_cooldown():
                     price = self.pair_prices.get(best_pair, 0)
                     if best_signal == "BUY":
@@ -1206,6 +1306,8 @@ class TradingBot:
                         elif self._daily_drawdown_hit():
                             self.logger.warning("BUY paused: daily loss limit reached")
                             self.kelly_fraction = self._calculate_kelly_fraction()
+                        elif self._bear_mode_active:
+                            self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
                         elif self.enable_regime_filter and not self._is_risk_on_regime():
                             self.logger.info("BUY skipped: regime filter is RISK_OFF")
                         elif score < self.min_buy_score:
