@@ -44,8 +44,8 @@ min_buy_score = 8.0
 # Trend/breakout: buy Bollinger Band upward breakout
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = false
-mr_rsi_oversold_threshold = 33
-mr_rsi_overbought_threshold = 67
+mr_rsi_oversold_threshold = 28
+mr_rsi_overbought_threshold = 62
 
 # Mentor v2 hardening (single auto-bot; no manual mode switching)
 enable_regime_filter = true
@@ -80,8 +80,8 @@ enable_volatility_targeting = true
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
-# Take-profit settings: base 3% (fees added on top), bull-run cap 7%
-take_profit_percent = 3.0
+# Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
+take_profit_percent = 4.5
 adaptive_take_profit = true
 max_take_profit_percent = 7.0
 # Small buffer to cover fees (percent added to required TP)
@@ -101,7 +101,7 @@ atr_trail_multiplier = 2.0
 # With atr_tp_multiplier=2.0 and typical 1h ATR ~1.5% for crypto, effective floor ~ 3% (matches base TP)
 # In low-volatility regimes ATR% < 1.5% → floor stays at take_profit_percent; in high-vol ATR 2.5% → floor 5%
 enable_atr_dynamic_tp = true
-atr_tp_multiplier = 2.0
+atr_tp_multiplier = 1.5
 
 # Pyramiding (add-to-winner) - disabled by default
 enable_pyramiding = false

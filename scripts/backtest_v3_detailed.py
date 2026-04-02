@@ -141,16 +141,26 @@ def fetch_ohlc(pair: str, since_ts: int, end_ts: int, interval: int = 60) -> Dic
     if cache_path.exists():
         return {int(k): float(v) for k, v in json.loads(cache_path.read_text()).items()}
 
-    # 2. Any file in mentor_cache_1h/ for this pair (already covers full year)
+    # 2. mentor_cache_1h — only use if it covers ≥70% of the requested window
+    _COVERAGE_THRESHOLD = 0.70
     if MENTOR_CACHE_DIR.exists():
         candidates = sorted(MENTOR_CACHE_DIR.glob(f"{pair}_*_60m.json"),
                             key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
-            raw = {int(k): float(v) for k, v in json.loads(candidates[0].read_text()).items()}
-            # filter to requested window
-            filtered = {k: v for k, v in raw.items() if since_ts <= k <= end_ts}
-            if filtered:
+            # Merge all available cache files for this pair for maximum coverage
+            merged: Dict[int, float] = {}
+            for cp in candidates:
+                try:
+                    raw = {int(k): float(v) for k, v in json.loads(cp.read_text()).items()}
+                    merged.update(raw)
+                except Exception:
+                    continue
+            filtered = {k: v for k, v in merged.items() if since_ts <= k <= end_ts}
+            expected_candles = (end_ts - since_ts) / (interval * 60)
+            coverage = len(filtered) / max(1, expected_candles)
+            if coverage >= _COVERAGE_THRESHOLD:
                 return filtered
+            # Coverage too low — fall through to API to fill gaps
 
     if USE_LOCAL_TS:
         local = load_local_timesales_ohlc(pair, since_ts, end_ts, interval)
