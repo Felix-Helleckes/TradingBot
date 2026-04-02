@@ -141,8 +141,8 @@ def fetch_ohlc(pair: str, since_ts: int, end_ts: int, interval: int = 60) -> Dic
     if cache_path.exists():
         return {int(k): float(v) for k, v in json.loads(cache_path.read_text()).items()}
 
-    # 2. mentor_cache_1h — only use if it covers ≥70% of the requested window
-    _COVERAGE_THRESHOLD = 0.70
+    # 2. mentor_cache_1h — use if coverage ≥ threshold (env var override for sweeps)
+    _COVERAGE_THRESHOLD = float(os.getenv("BT_COVERAGE_THRESHOLD", "0.70"))
     if MENTOR_CACHE_DIR.exists():
         candidates = sorted(MENTOR_CACHE_DIR.glob(f"{pair}_*_60m.json"),
                             key=lambda p: p.stat().st_mtime, reverse=True)
