@@ -1181,9 +1181,9 @@ class TradingBot:
         return None, None, None
 
     def _warmup_pair_history(self, pair):
-        """Seed price history from 15m OHLC candles when history is too sparse."""
+        """Seed price history from 60m OHLC candles when history is too sparse."""
         try:
-            ohlc = self.api_client.get_ohlc_data(pair, interval=15)
+            ohlc = self.api_client.get_ohlc_data(pair, interval=60)
             if not ohlc:
                 return
             data_key = next((k for k in ohlc if k != 'last'), None)

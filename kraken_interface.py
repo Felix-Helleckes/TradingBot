@@ -23,11 +23,40 @@ class KrakenAPI:
         return False
 
     def _is_rate_limit_error(self, response):
-        """Return True if the Kraken response indicates a rate-limit error."""
+        """Return True if the Kraken response indicates a rate-limit or lockout error."""
         errs = response.get('error', [])
         if isinstance(errs, str):
             errs = [errs]
-        return any('Rate limit' in str(e) or 'EAPI:Rate limit' in str(e) for e in errs)
+        return any(
+            'Rate limit' in str(e) or 'EAPI:Rate limit' in str(e) or 'EGeneral:Temporary lockout' in str(e)
+            for e in errs
+        )
+
+    def _query_private_with_backoff(self, endpoint, params=None, retries=5):
+        """Query a private Kraken endpoint with exponential backoff on rate-limit/lockout errors."""
+        params = params or {}
+        last_error = None
+        for attempt in range(retries):
+            if attempt > 0:
+                delay = self.rate_limit_delay * (4 ** attempt)  # aggressive backoff: 2s, 8s, 32s, 128s
+                self.logger.warning(
+                    f"{endpoint} backing off {delay:.1f}s before attempt {attempt + 1}/{retries} …"
+                )
+                time.sleep(delay)
+            else:
+                time.sleep(self.rate_limit_delay)
+            try:
+                response = self.api.query_private(endpoint, params)
+                if self._is_rate_limit_error(response):
+                    last_error = response.get('error')
+                    self.logger.warning(f"{endpoint} rate-limited/locked out (attempt {attempt + 1}/{retries}): {last_error}")
+                    continue
+                return response
+            except Exception as e:
+                self.logger.exception(f"Exception in private {endpoint} attempt {attempt + 1}: {e}")
+                return None
+        self.logger.error(f"{endpoint} failed after {retries} retries: {last_error}")
+        return None
 
     def _query_public_with_backoff(self, endpoint, params=None, retries=4):
         """Query a public Kraken endpoint with exponential backoff on rate-limit errors."""
@@ -54,7 +83,9 @@ class KrakenAPI:
 
     def get_account_balance(self):
         try:
-            response = self.api.query_private('Balance')
+            response = self._query_private_with_backoff('Balance')
+            if response is None:
+                return None
             if self._handle_error(response, "Balance Query"):
                 return None
             return response.get('result', {})
@@ -328,8 +359,9 @@ class KrakenAPI:
 
     def get_open_orders(self):
         try:
-            time.sleep(self.rate_limit_delay)
-            response = self.api.query_private('OpenOrders')
+            response = self._query_private_with_backoff('OpenOrders')
+            if response is None:
+                return None
             if self._handle_error(response, "Open Orders Query"):
                 return None
             return response.get('result', {})
@@ -420,8 +452,9 @@ class KrakenAPI:
                 params['start'] = int(start)
 
             if not fetch_all:
-                time.sleep(self.rate_limit_delay)
-                response = self.api.query_private('Ledgers', params)
+                response = self._query_private_with_backoff('Ledgers', params)
+                if response is None:
+                    return None
                 if self._handle_error(response, "Ledgers Query"):
                     return None
                 return response.get('result', {}).get('ledger', {})
@@ -465,10 +498,10 @@ class KrakenAPI:
             if start:
                 params['start'] = int(start)
 
-            # Default behavior: single page (Kraken default limit, usually 50)
             if not fetch_all:
-                time.sleep(self.rate_limit_delay)
-                response = self.api.query_private('TradesHistory', params)
+                response = self._query_private_with_backoff('TradesHistory', params)
+                if response is None:
+                    return None
                 if self._handle_error(response, "Trade History Query"):
                     return None
                 return response.get('result', {}).get('trades', {})

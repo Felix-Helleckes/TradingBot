@@ -165,10 +165,10 @@ class TechnicalAnalysis:
                     rsi_s = -((rsi_full - 70) / 30 * 50)
                 sma_s = max(-50.0, min(50.0, sma_ratio * 100 * 10))
                 mr_score = rsi_s + sma_s
-                if rsi_full <= self.mr_rsi_buy and sma_ratio > -0.003:
+                if rsi_full <= self.mr_rsi_buy and sma_ratio > -0.01:
                     signal = "BUY"
                     score = mr_score
-                elif rsi_full >= self.mr_rsi_sell and sma_ratio < 0.003:
+                elif rsi_full >= self.mr_rsi_sell and sma_ratio < 0.01:
                     signal = "SELL"
                     score = mr_score
 

@@ -35,7 +35,7 @@ stop_loss_percent = 2.0
 # dynamic sizing uses this % of available EUR, capped by trade_amount_eur
 allocation_per_trade_percent = 20.0
 # Entry quality filter: lowered to match backtest reversion_bias score_gate=8
-min_buy_score = 8.0
+min_buy_score = 15.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -53,7 +53,7 @@ enable_mtf_regime_scoring = true
 mtf_regime_min_score = -2.0
 # Do not auto-sell at a loss: disable hard stop loss
 enable_hard_stop_loss = true
-hard_stop_loss_percent = 4.0
+hard_stop_loss_percent = 2.5
 
 # Break-Even Stop-Loss (move SL to entry price once in profit)
 enable_break_even = true
@@ -79,10 +79,10 @@ volume_filter_min_ratio = 0.5
 
 # Sell logic: require minimum profit and allow higher TP in bull run
 enable_time_stop = true
-time_stop_hours = 72
+time_stop_hours = 16
 # Aggressive autonomy: disable daily drawdown cutoff and favor full allocation
-enable_daily_drawdown = false
-daily_loss_limit_percent = 90.0
+enable_daily_drawdown = true
+daily_loss_limit_percent = 5.0
 # Risk-off sizing: reversion_bias uses 0.50 (vs 0.60 baseline)
 risk_off_allocation_multiplier = 0.50
 enable_volatility_targeting = true
@@ -90,9 +90,9 @@ target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 4.5
+take_profit_percent = 6.5
 adaptive_take_profit = true
-max_take_profit_percent = 7.0
+max_take_profit_percent = 9.0
 # Small buffer to cover fees (percent added to required TP)
 # Kraken maker=0.16% entry + taker=0.26% exit = 0.42% minimum; use 0.45% for safety
 sell_fee_buffer_percent = 0.45
@@ -181,7 +181,7 @@ bear_log_interval_minutes = 60
 
 [shorting]
 enabled = true
-leverage = "2"
+leverage = "1"
 max_short_notional_eur = 50.0
 
 [logging]

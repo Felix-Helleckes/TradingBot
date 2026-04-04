@@ -6,9 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=felix
-WorkingDirectory=/home/felix/TradingBot
+WorkingDirectory=/home/felix/tradingbot
 
-ExecStart=/home/felix/TradingBot/venv/bin/python /home/felix/TradingBot/main.py
+ExecStart=/home/felix/tradingbot/venv/bin/python /home/felix/tradingbot/main.py
 Restart=always
 # Longer restart delay avoids CPU-thrashing when Kraken API is down
 RestartSec=30
