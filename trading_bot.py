@@ -1122,6 +1122,20 @@ class TradingBot:
 
         return None, None, None
 
+    def _warmup_pair_history(self, pair):
+        """Seed price history from 15m OHLC candles when history is too sparse."""
+        try:
+            ohlc = self.api_client.get_ohlc_data(pair, interval=15)
+            if not ohlc:
+                return
+            data_key = next((k for k in ohlc if k != 'last'), None)
+            if not data_key:
+                return
+            closes = [float(row[4]) for row in ohlc[data_key]]
+            self.analysis_tool.seed_from_ohlc(pair, closes)
+        except Exception as e:
+            self.logger.warning(f"OHLC warmup failed for {pair}: {e}")
+
     def analyze_all_pairs(self):
         best_pair = None
         best_signal = "HOLD"
@@ -1136,6 +1150,10 @@ class TradingBot:
                 pair_key = list(market_data.keys())[0]
                 current_price = float(market_data[pair_key]['c'][0])
                 self.pair_prices[pair] = current_price
+
+                # Seed history from 15m OHLC candles if not yet warmed up
+                if len(self.analysis_tool._get_price_history(pair_key)) < self.analysis_tool.sma_long:
+                    self._warmup_pair_history(pair)
                 
                 # Update airbag history and check for crash
                 self._update_airbag_history(pair, current_price)

@@ -54,7 +54,7 @@ regime_min_score = -10.0
 enable_mtf_regime_scoring = true
 mtf_regime_min_score = -2.0
 # Do not auto-sell at a loss: disable hard stop loss
-enable_hard_stop_loss = false
+enable_hard_stop_loss = true
 hard_stop_loss_percent = 4.0
 
 # Break-Even Stop-Loss (move SL to entry price once in profit)

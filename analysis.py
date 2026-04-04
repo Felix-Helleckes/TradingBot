@@ -13,14 +13,14 @@ class TechnicalAnalysis:
     Supports multi-pair analysis with separate price history per pair.
     """
 
-    def __init__(self, rsi_period=14, sma_short=20, sma_long=30, min_volatility_pct=0.15):
+    def __init__(self, rsi_period=14, sma_short=20, sma_long=50, min_volatility_pct=0.15):
         self.rsi_period = rsi_period
         self.sma_short = sma_short
         self.sma_long = sma_long
         self.min_volatility_pct = min_volatility_pct
         self.logger = logging.getLogger(__name__)
         self.pair_price_history = {}
-        self.max_history = max(rsi_period + 2, sma_long + 5)
+        self.max_history = 65  # enough for SMA50 + RSI14 + buffer
         self.buffer_path = os.path.join(os.path.dirname(__file__), 'data', 'history_buffer.json')
         # Signal engine mode flags (pushed from TradingBot after config load)
         self.enable_mr_signals = True    # mean-reversion: RSI oversold/overbought
@@ -65,6 +65,18 @@ class TechnicalAnalysis:
                 raise
         except Exception as e:
             self.logger.error(f"Error saving price history buffer: {e}")
+
+    def seed_from_ohlc(self, pair, closes):
+        """Pre-populate price history from OHLC candle closes.
+        Only seeds if the current history is too sparse for reliable signals.
+        """
+        history = self._get_price_history(pair)
+        if len(history) >= self.sma_long:
+            return  # already warmed up
+        for c in closes[-self.max_history:]:
+            history.append(float(c))
+        self._save_history()
+        self.logger.info(f"[OHLC seed] {pair}: seeded {len(history)} closes from 15m candles")
 
     def calculate_rsi(self, prices):
         if len(prices) < self.rsi_period + 1:
