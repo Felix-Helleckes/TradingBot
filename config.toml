@@ -12,24 +12,22 @@ auto_select_pair = true
 
 # Kraken-normalized EUR pairs (altname format preferred)
 trade_pairs = [
-    "XETHZEUR",  # Ethereum
-    "SOLEUR",    # Solana
-    "ADAEUR",    # Cardano  (+best backtest: +1.92€)
-    "XXRPZEUR",  # Ripple
-    "LINKEUR"    # Chainlink
+    "XXBTZEUR",  # Bitcoin  - höchste Liquidität, engster Spread
+    "XETHZEUR",  # Ethereum - zweitliquideste, gute Intraday-Vola
+    "SOLEUR",    # Solana   - volatile, gut für kurzfristige Moves
+    "XXRPZEUR",  # Ripple   - hohe EUR-Liquidität auf Kraken
 ]
 
 [bot_settings.min_volumes]
+XXBTZEUR = 0.0001
 XETHZEUR = 0.001
 SOLEUR = 0.02
-ADAEUR = 5.0
 XXRPZEUR = 5.0
-LINKEUR = 0.2
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 1000.0
-initial_balance = 10000.0
-target_balance_eur = 10000.0
+trade_amount_eur = 20.0
+initial_balance = 100.0
+target_balance_eur = 150.0
 
 [risk_management]
 max_drawdown_percent = 10.0
@@ -108,7 +106,7 @@ enable_pyramiding = false
 pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = half way to TP)
 
 # Execution/risk guards
-max_open_positions = 7
+max_open_positions = 2
 # Cooldowns tuned to reversion_bias: 60min per-pair, 90min global
 # Fewer trades = lower fee drag, matches 43 trades/year vs 154 for main_baseline
 trade_cooldown_seconds = 3600
@@ -119,10 +117,9 @@ min_trade_eur = 10.0
 
 # Parallel trading caps and safety buffer
 # Minimum free margin (EUR) to leave available before placing new opens
-min_free_margin_buffer = 10.0
+min_free_margin_buffer = 5.0
 # Maximum notional exposure (EUR) allowed per side (long/short)
-# This can be dynamically scaled in code relative to current equity
-max_notional_per_side = 300.0
+max_notional_per_side = 40.0
 # Maximum number of open positions allowed per side
 max_open_positions_per_side = 12
 # Enable enforcement of the parallel caps/rules
