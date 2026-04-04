@@ -12,10 +12,10 @@ auto_select_pair = true
 
 # Kraken-normalized EUR pairs (altname format preferred)
 trade_pairs = [
-    "XXBTZEUR",  # Bitcoin  - höchste Liquidität, engster Spread
-    "XETHZEUR",  # Ethereum - zweitliquideste, gute Intraday-Vola
-    "SOLEUR",    # Solana   - volatile, gut für kurzfristige Moves
-    "XXRPZEUR",  # Ripple   - hohe EUR-Liquidität auf Kraken
+    "XXBTZEUR",  # Bitcoin  - highest liquidity, tightest spread
+    "XETHZEUR",  # Ethereum - second most liquid, good intraday volatility
+    "SOLEUR",    # Solana   - volatile, suitable for short-term moves
+    "XXRPZEUR",  # Ripple   - high EUR liquidity on Kraken
 ]
 
 [bot_settings.min_volumes]
