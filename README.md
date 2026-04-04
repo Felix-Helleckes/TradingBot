@@ -1,5 +1,9 @@
 # 🤖 Kraken Trading Bot
 
+[![Watch Live](https://img.shields.io/badge/▶_Watch_Live-YouTube-red?style=for-the-badge&logo=youtube)](https://www.youtube.com/@TheEfficientDev)
+[![Trading Bot](https://img.shields.io/badge/Trading_Bot-GitHub-181717?style=for-the-badge&logo=github)](https://github.com/irgendwasmitfelix/TradingBot)
+[![Portfolio](https://img.shields.io/badge/Portfolio-irgendwasmitfelix.github.io-0a66c2?style=for-the-badge&logo=github)](https://irgendwasmitfelix.github.io)
+
 An automated, signal-driven spot trading bot for [Kraken](https://www.kraken.com) — built for EUR pairs, designed to be lean, transparent, and safe to run with real money.
 
 > ⚠️ **This bot executes real trades.** Always start with a small amount and monitor logs closely. Never risk more than you can afford to lose.
