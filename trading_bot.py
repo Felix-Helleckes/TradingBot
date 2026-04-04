@@ -147,6 +147,16 @@ class TradingBot:
         self.sentiment_pause_keywords = ["crash", "hack", "dump", "sec", "lawsuit", "regulation", "ban"]
         self.sentiment_active = False
 
+        # Time-of-day filter: only open new positions during high-volume hours (UTC)
+        self.enable_trading_hours = bool(self.config.get('risk_management', {}).get('enable_trading_hours', True))
+        self.trading_hours_start_utc = int(self.config.get('risk_management', {}).get('trading_hours_start_utc', 14))
+        self.trading_hours_end_utc = int(self.config.get('risk_management', {}).get('trading_hours_end_utc', 22))
+
+        # Volume filter: skip entries when volume is unusually low
+        self.enable_volume_filter = bool(self.config.get('risk_management', {}).get('enable_volume_filter', True))
+        self.volume_filter_min_ratio = float(self.config.get('risk_management', {}).get('volume_filter_min_ratio', 0.5))
+        self._volume_cache = {}  # {pair: (timestamp, ratio)}
+
         # Bear Shield: auto-park in FIAT during confirmed downtrends
         bear_cfg = self.config.get('bear_shield', {})
         self.enable_bear_shield = bool(bear_cfg.get('enable_bear_shield', False))
@@ -817,6 +827,54 @@ class TradingBot:
         vol_scale = min(1.25, max(0.35, self.target_volatility_pct / vol))
         return max(0.2, min(1.25, base * vol_scale))
 
+    def _is_trading_hours(self):
+        """Returns True if current UTC hour is within the configured trading window."""
+        if not self.enable_trading_hours:
+            return True
+        hour = datetime.now(timezone.utc).hour
+        start = self.trading_hours_start_utc
+        end = self.trading_hours_end_utc
+        if start < end:
+            return start <= hour < end
+        # Overnight window support (e.g. 22:00–06:00)
+        return hour >= start or hour < end
+
+    def _has_sufficient_volume(self, pair):
+        """Returns True if the latest 15m candle volume is >= min_ratio × 20-candle average.
+        Uses a 5-minute cache to avoid redundant API calls.
+        """
+        if not self.enable_volume_filter:
+            return True
+        try:
+            cached = self._volume_cache.get(pair)
+            if cached and (time.time() - cached[0]) < 300:
+                return cached[1] >= self.volume_filter_min_ratio
+
+            ohlc = self.api_client.get_ohlc_data(pair, interval=15)
+            if not ohlc:
+                return True
+            data_key = next((k for k in ohlc if k != 'last'), None)
+            if not data_key:
+                return True
+            rows = ohlc[data_key]
+            if len(rows) < 3:
+                return True
+            volumes = [float(row[6]) for row in rows]
+            window = volumes[-20:] if len(volumes) >= 20 else volumes
+            avg_vol = sum(window) / len(window)
+            current_vol = volumes[-1]
+            ratio = current_vol / avg_vol if avg_vol > 0 else 1.0
+            self._volume_cache[pair] = (time.time(), ratio)
+            if ratio < self.volume_filter_min_ratio:
+                self.logger.info(
+                    f"BUY skipped for {pair}: low volume (ratio {ratio:.2f} < {self.volume_filter_min_ratio})"
+                )
+                return False
+            return True
+        except Exception as e:
+            self.logger.warning(f"Volume check failed for {pair}: {e}")
+            return True  # fail open — don't block trades on API errors
+
     def _is_temporarily_paused(self):
         return time.time() < self.trading_paused_until_ts
 
@@ -1336,6 +1394,13 @@ class TradingBot:
                             self.logger.info("BUY skipped: max open positions reached")
                         elif not self._is_mtf_trend_bullish(best_pair):
                             self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
+                        elif not self._is_trading_hours():
+                            self.logger.info(
+                                f"BUY skipped: outside trading hours "
+                                f"({self.trading_hours_start_utc}:00-{self.trading_hours_end_utc}:00 UTC)"
+                            )
+                        elif not self._has_sufficient_volume(best_pair):
+                            pass  # already logged inside _has_sufficient_volume
                         else:
                             self.execute_buy_order(best_pair, price)
                     elif best_signal == "SELL":

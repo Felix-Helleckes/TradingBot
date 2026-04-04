@@ -66,6 +66,17 @@ airbag_window_minutes = 10
 # Optional news/sentiment guard (disabled by default)
 enable_sentiment_guard = false
 
+# Time-of-day filter: only open new positions during high-volume hours (UTC)
+# 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
+enable_trading_hours = true
+trading_hours_start_utc = 14
+trading_hours_end_utc = 22
+
+# Volume filter: skip BUY if current 15m candle volume < ratio × 20-candle average
+# 0.5 = must be at least 50% of normal volume
+enable_volume_filter = true
+volume_filter_min_ratio = 0.5
+
 # Sell logic: require minimum profit and allow higher TP in bull run
 enable_time_stop = true
 time_stop_hours = 72
