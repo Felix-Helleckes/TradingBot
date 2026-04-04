@@ -68,7 +68,7 @@ enable_sentiment_guard = false
 
 # Time-of-day filter: only open new positions during high-volume hours (UTC)
 # 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
-enable_trading_hours = true
+enable_trading_hours = false
 trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 
