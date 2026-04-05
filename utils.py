@@ -4,8 +4,52 @@ import toml
 import logging
 from pathlib import Path
 
+_DEFAULT_CFG_PATH = Path(__file__).parent / "config.toml"
+
 
 def load_config(config_path):
+    """
+    Load configuration from a TOML file.
+
+    Args:
+        config_path (str): Path to the TOML configuration file.
+
+    Returns:
+        dict: Configuration dictionary.
+    """
+    try:
+        if not Path(config_path).exists():
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+        with open(config_path, 'r') as f:
+            config = toml.load(f)
+
+        logging.info(f"Configuration loaded successfully from {config_path}")
+        return config
+    except Exception as e:
+        logging.error(f"Error loading configuration: {e}")
+        raise
+
+
+def nas_paths(cfg_path: Path = _DEFAULT_CFG_PATH) -> dict:
+    """Return NAS path config as a dict of Path objects.
+
+    Keys: nas_root, ohlc_2026, ohlc_2025, bot_cache
+    Falls back to sensible defaults if config is missing.
+    """
+    try:
+        cfg = toml.load(cfg_path).get("paths", {})
+    except Exception:
+        cfg = {}
+
+    root = Path(cfg.get("nas_root", "/mnt/fritz_nas/Volume/kraken"))
+    return {
+        "nas_root":  root,
+        "ohlc_2026": Path(cfg.get("nas_ohlc_2026", str(root / "2026" / "ohlc"))),
+        "ohlc_2025": Path(cfg.get("nas_ohlc_2025", str(root / "2025" / "ohlcvt"))),
+        "bot_cache": Path(cfg.get("nas_bot_cache",  str(root / "bot_cache"))),
+    }
+
     """
     Load configuration from a TOML file.
 

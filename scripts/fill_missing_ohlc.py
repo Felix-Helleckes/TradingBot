@@ -11,16 +11,19 @@ hitting Kraken public API limits.
 from __future__ import annotations
 import time
 import json
+import sys
 import requests
 import argparse
 from pathlib import Path
 from datetime import datetime, timezone
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths
 
 INTERVAL = 60  # minutes
 SLEEP_BETWEEN = 0.45  # seconds between public API calls (conservative)
 MAX_LOOPS = 1000
 
-BASES = [Path('/mnt/fritz_nas/Volume/kraken/2026/ohlc')]
+BASES = [nas_paths()["ohlc_2026"]]
 
 
 def parse_args():

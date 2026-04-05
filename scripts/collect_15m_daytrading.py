@@ -15,15 +15,18 @@ resumes from last known timestamp).
 """
 import argparse
 import json
+import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths as _nas_paths
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
 INTERVAL = 15  # minutes
-OUT_DIR = Path("data/daytrading_15m")
+OUT_DIR = _nas_paths()["bot_cache"] / "daytrading_15m"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 sess = requests.Session()

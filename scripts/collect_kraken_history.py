@@ -2,13 +2,16 @@
 import csv
 import gzip
 import time
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths
 import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 INTERVALS = [1, 15, 60]  # 1m, 15m, 1h
-BASE_DIR = Path('/mnt/fritz_nas/Volume/kraken/2026/ohlc')
+BASE_DIR = nas_paths()["ohlc_2026"]
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 sess = requests.Session()

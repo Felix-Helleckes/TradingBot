@@ -2,14 +2,18 @@
 import csv
 import json
 import time
+import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import requests
 import os
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 INTERVALS = [1, 15, 60]
-BASE_DIR = Path(os.getenv('COLLECT_BASE_DIR', '/mnt/fritz_nas/Volume/kraken/2026/ohlc'))
+_NAS = nas_paths()
+BASE_DIR = Path(os.getenv('COLLECT_BASE_DIR', str(_NAS["ohlc_2026"])))
 STATE_DIR = BASE_DIR / '_state'
 STATE_FILE = STATE_DIR / 'collector_state.json'
 LOG_FILE = BASE_DIR / 'collector_runtime.log'

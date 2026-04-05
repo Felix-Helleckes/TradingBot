@@ -34,8 +34,12 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
-DATA_15M = Path("data/daytrading_15m")
-DATA_1H  = Path("data/mentor_cache_1h")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths as _nas_paths
+_NAS = _nas_paths()
+DATA_15M = _NAS["bot_cache"] / "daytrading_15m"
+DATA_1H  = _NAS["bot_cache"] / "mentor_cache_1h"
 
 RSI_PERIOD  = 14
 BB_PERIOD   = 20

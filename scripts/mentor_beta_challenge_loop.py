@@ -10,7 +10,11 @@ import numpy as np
 import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
-CACHE_DIR = Path("data/mentor_cache_1h")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths as _nas_paths
+_NAS = _nas_paths()
+CACHE_DIR = _NAS["bot_cache"] / "mentor_cache_1h"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 @dataclass

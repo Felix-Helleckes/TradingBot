@@ -35,8 +35,12 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
-DATA_DIR = Path("data/daytrading_15m")
-MENTOR_CACHE_DIR = Path("data/mentor_cache_1h")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils import nas_paths as _nas_paths
+_NAS = _nas_paths()
+DATA_DIR = _NAS["bot_cache"] / "daytrading_15m"
+MENTOR_CACHE_DIR = _NAS["bot_cache"] / "mentor_cache_1h"
 INTERVAL_MIN = 15
 CANDLE_SEC = INTERVAL_MIN * 60
 

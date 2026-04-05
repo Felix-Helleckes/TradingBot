@@ -65,14 +65,15 @@ _MAX_TP_PCT     = float(_RM.get("max_take_profit_percent", 7.0))
 _ATR_PERIOD     = int(_RM.get("atr_period", 14))
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
-CACHE_DIR = Path("data/ohlc_cache")
+_NAS = _CFG.get("paths", {})
+_NAS_ROOT = Path(_NAS.get("nas_root", "/mnt/fritz_nas/Volume/kraken"))
+_BOT_CACHE = Path(_NAS.get("nas_bot_cache", str(_NAS_ROOT / "bot_cache")))
+CACHE_DIR = _BOT_CACHE / "ohlc_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-MENTOR_CACHE_DIR = Path("data/mentor_cache_1h")
+MENTOR_CACHE_DIR = _BOT_CACHE / "mentor_cache_1h"
 
 # NAS path: unified kraken/ structure, year-based
-_NAS_DEFAULT = (
-    "/mnt/fritz_nas/Volume/kraken/2026/ohlc"
-)
+_NAS_DEFAULT = _NAS.get("nas_ohlc_2026", str(_NAS_ROOT / "2026" / "ohlc"))
 LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", _NAS_DEFAULT))
 USE_LOCAL_TS = os.getenv("USE_LOCAL_TS", "1") == "1"
 
