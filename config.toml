@@ -222,7 +222,7 @@ notify_min_profit_pct = 0.0
 # NAS root directory (unified kraken/ folder). Override here if mount point changes.
 nas_root = "/mnt/fritz_nas/Volume/kraken"
 # Derived NAS paths (relative to nas_root — override only if structure differs)
-nas_ohlc_2026 = "/mnt/fritz_nas/Volume/kraken/2026/ohlc"
+nas_ohlc_2026 = "/mnt/fritz_nas/Volume/kraken/2026"
 nas_ohlc_2025 = "/mnt/fritz_nas/Volume/kraken/2025/ohlcvt"
 nas_bot_cache  = "/mnt/fritz_nas/Volume/kraken/bot_cache"
 # Local runtime cache (small, ephemeral — stays on disk not NAS)
