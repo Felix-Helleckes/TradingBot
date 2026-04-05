@@ -243,22 +243,23 @@ class KrakenAPI:
                 side_exposure = exposure_long if direction == 'buy' else exposure_short
                 side_count = count_long if direction == 'buy' else count_short
 
-                # dynamic allowed notional by side cap (consider equity-based dynamic cap)
+                # Single TradeBalance call — provides both equity and free margin
+                tb = {}
                 try:
-                    tb_resp = self.api.query_private('TradeBalance')
-                    if tb_resp.get('error'):
-                        tb = {}
-                    else:
+                    tb_resp = self._query_private_with_backoff('TradeBalance')
+                    if tb_resp and not tb_resp.get('error'):
                         tb = tb_resp.get('result', {})
-                except Exception:
-                    tb = {}
+                    elif tb_resp:
+                        self.logger.debug(f"TradeBalance error during preflight: {tb_resp.get('error')}")
+                except Exception as e:
+                    self.logger.debug(f"TradeBalance exception during preflight: {e}")
 
-                # equity estimation ('e' or 'eb' or 'zeur')
+                # equity estimation ('e' = equity, 'eb' = equivalent balance)
                 equity = 0.0
-                for ek in ('e', 'eb', 'zeur'):
+                for ek in ('e', 'eb'):
                     if ek in tb:
                         try:
-                            equity = float(tb.get(ek, 0.0))
+                            equity = float(tb[ek])
                             break
                         except Exception:
                             continue
@@ -270,17 +271,11 @@ class KrakenAPI:
                 if allowed_by_side < 0:
                     allowed_by_side = 0.0
 
-                # check free margin
-                try:
-                    time.sleep(self.rate_limit_delay)
-                    tb2 = self.api.query_private('TradeBalance')
-                    if tb2.get('error'):
-                        self.logger.debug(f"TradeBalance error during preflight: {tb2.get('error')}")
-                        mf = 0.0
-                    else:
-                        mf = float(tb2.get('result', {}).get('mf', 0.0))
-                except Exception:
-                    mf = 0.0
+                # free margin from same response (mf = equity - initial margin)
+                mf = float(tb.get('mf', 0.0))
+                if mf == 0.0 and equity > 0:
+                    # Fallback: if no margin in use, full equity is effectively free
+                    mf = equity
 
                 # compute allowed by margin (simple estimate using leverage)
                 lev = float(leverage) if leverage else 1.0
@@ -288,6 +283,10 @@ class KrakenAPI:
 
                 # final allowed notional
                 final_allowed = min(allowed_by_side, allowed_by_margin)
+                self.logger.debug(
+                    f"Preflight: equity={equity:.2f} mf={mf:.2f} side_exp={side_exposure:.2f} "
+                    f"allowed_side={allowed_by_side:.2f} allowed_margin={allowed_by_margin:.2f} final={final_allowed:.2f}"
+                )
 
                 aggressive = bool(risk_cfg.get('aggressive_autoscale', False))
 
