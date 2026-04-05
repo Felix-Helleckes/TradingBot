@@ -195,6 +195,8 @@ class TradingBot:
         self.enable_live_shorts = bool(self.config.get('shorting', {}).get('enabled', False))
         self.short_leverage = str(self.config.get('shorting', {}).get('leverage', '2'))
         self.max_short_notional_eur = float(self.config.get('shorting', {}).get('max_short_notional_eur', 50.0))
+        self.short_take_profit_percent = float(self.config.get('shorting', {}).get('short_take_profit_percent', 2.5))
+        self.short_stop_loss_percent = float(self.config.get('shorting', {}).get('short_stop_loss_percent', 3.0))
 
         # Fast scalp / hit-and-run profile
         self.enable_fast_scalp = bool(self.config.get('profiles', {}).get('fast_scalp', {}).get('enabled', False))
@@ -1431,15 +1433,14 @@ class TradingBot:
                         if drop_from_peak >= self.trailing_stop_percent:
                             return pair, "TRAILING_STOP", change_percent
 
-            # Short position exits
+            # Short position exits — use dedicated short TP/SL (lower than long TP)
             short_qty = self.short_qty.get(pair, 0.0)
             short_entry = self.short_entry_prices.get(pair, 0.0)
             if self.enable_live_shorts and short_qty > 0 and short_entry > 0:
                 short_change_percent = ((short_entry - current_price) / short_entry) * 100.0
-                req_tp = self._required_take_profit_percent(pair)
-                if self.take_profit_percent > 0 and short_change_percent >= req_tp:
+                if short_change_percent >= self.short_take_profit_percent:
                     return pair, "SHORT_TAKE_PROFIT", short_change_percent
-                if self.enable_hard_stop_loss and short_change_percent <= -abs(self.hard_stop_loss_percent):
+                if short_change_percent <= -abs(self.short_stop_loss_percent):
                     return pair, "SHORT_HARD_STOP", short_change_percent
                 if self.enable_time_stop:
                     opened_at = self.entry_timestamps.get(pair)
