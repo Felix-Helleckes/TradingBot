@@ -5,11 +5,13 @@ Only posts limit BUYs to close shorts (type='sell').
 Config: LIMIT_OFFSET_PCT (how much ABOVE current price to place buy), MAX_POST (max orders to post per run)
 """
 import os, json, time
+from pathlib import Path
 from dotenv import load_dotenv
 from krakenex import API
 from order_lock import acquire_order_lock
 
-load_dotenv('/home/felix/TradingBot/.env')
+_HERE = Path(__file__).parent
+load_dotenv(_HERE / '.env')
 API_KEY=os.getenv('KRAKEN_API_KEY')
 API_SECRET=os.getenv('KRAKEN_API_SECRET')
 api=API(API_KEY, API_SECRET)
@@ -18,7 +20,7 @@ LIMIT_OFFSET_PCT = 0.001  # 0.1% above current price for aggressive buy-to-close
 MAX_POST = 12
 MIN_COST_EUR = 1.0  # skip very tiny positions
 
-LOG='/home/felix/TradingBot/logs/post_limit_closes.log'
+LOG= _HERE / 'logs' / 'post_limit_closes.log'
 
 def log(msg):
     ts=time.strftime('%Y-%m-%d %H:%M:%S')
@@ -127,7 +129,7 @@ def main():
             count+=1
         time.sleep(0.8)
 
-    out_path='/home/felix/TradingBot/logs/post_limit_closes_results.json'
+    out_path= _HERE / 'logs' / 'post_limit_closes_results.json'
     with open(out_path+'.tmp','w') as f:
         json.dump(posted,f,indent=2)
     os.replace(out_path+'.tmp', out_path)

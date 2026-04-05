@@ -3,11 +3,13 @@
 Close short positions automatically when unrealized profit percent >= threshold + fee
 """
 import os, json, time
+from pathlib import Path
 from dotenv import load_dotenv
 from krakenex import API
 from order_lock import acquire_order_lock
 
-load_dotenv('/home/felix/TradingBot/.env')
+_HERE = Path(__file__).parent
+load_dotenv(_HERE / '.env')
 API_KEY=os.getenv('KRAKEN_API_KEY')
 API_SECRET=os.getenv('KRAKEN_API_SECRET')
 api=API(API_KEY, API_SECRET)
@@ -18,7 +20,7 @@ FEE_RATE = 0.002       # assumed taker fee (0.2%) for closing
 REQUIRED_PCT = MIN_PROFIT_PCT + (FEE_RATE*100)
 MIN_NOTIONAL_EUR = 1.0 # don't attempt to close tiny positions
 
-LOG_PATH = '/home/felix/TradingBot/logs/close_on_profit.log'
+LOG_PATH = _HERE / 'logs' / 'close_on_profit.log'
 
 def log(msg):
     ts = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -127,7 +129,7 @@ def main():
         time.sleep(1.0)
 
     # write results
-    out = '/home/felix/TradingBot/logs/close_on_profit_results.json'
+    out = _HERE / 'logs' / 'close_on_profit_results.json'
     with open(out+'.tmp','w') as f:
         json.dump(results, f, indent=2)
     os.replace(out+'.tmp', out)

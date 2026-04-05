@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # Autosim main loop with safety: lock, trap cleanup, rsync tuning, mount retries
-BASE="/home/felix/TradingBot"
+BASE="/home/felix/tradingbot"
 PY="$BASE/venv/bin/python3"
 OUT_DIR="$BASE/reports/autosim"
-NAS_OUT_DIR="/home/felix/mnt_nas_v2/Volume/kraken_research_data/autosim"
+NAS_MOUNT="/mnt/fritz_nas"
+NAS_OUT_DIR="$NAS_MOUNT/Volume/kraken/2026/autosim"
 LOG="$OUT_DIR/autosim_loop.log"
 LOCKFILE="/tmp/autosim_main.lock"
 
@@ -56,7 +57,7 @@ run_backtest(){
   mkdir -p "$CACHE_DIR"
 
   # rsync with retries and limited bandwidth (avoid saturating network)
-  RSYNC_SRC="/home/felix/mnt_nas_v2/Volume/kraken_research_data/"
+  RSYNC_SRC="$NAS_MOUNT/Volume/kraken/2026/ohlc/"
   RSYNC_OPTS=( -az --partial --bwlimit=2000 --include='*/' --include='*.csv' --exclude='*' --timeout=60 )
   rr=0
   while [ $rr -lt 3 ]; do
@@ -119,15 +120,15 @@ main(){
   fi
   
   # Ensure NAS is mounted (retry on failure)
-  if ! mountpoint -q "/home/felix/mnt_nas_v2"; then
+  if ! mountpoint -q "$NAS_MOUNT"; then
     log "NAS not mounted. Attempting mount (up to 3 attempts)..."
     mtry=0
     while [ $mtry -lt 3 ]; do
-      sudo mount -t cifs //192.168.178.1/fritz.nas /home/felix/mnt_nas_v2 -o credentials=/root/.smb/fritz_nas_creds,vers=3.0,iocharset=utf8,uid=1000,gid=1000,noserverino && break || true
+      sudo mount -t cifs //192.168.178.1/fritz.nas "$NAS_MOUNT" -o credentials=/root/.smb/fritz_nas_creds,vers=3.0,iocharset=utf8,uid=1000,gid=1000,noserverino && break || true
       mtry=$((mtry+1))
       sleep $((mtry * 3))
     done
-    if ! mountpoint -q "/home/felix/mnt_nas_v2"; then
+    if ! mountpoint -q "$NAS_MOUNT"; then
       log "Warning: NAS mount failed after retries. Will continue, rsync will attempt fallback copy."
     else
       log "NAS mount succeeded"

@@ -69,11 +69,9 @@ CACHE_DIR = Path("data/ohlc_cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 MENTOR_CACHE_DIR = Path("data/mentor_cache_1h")
 
-# NAS path: Linux (Pi) uses /home/felix/mnt_nas, macOS uses /Volumes/FRITZ.NAS
+# NAS path: unified kraken/ structure, year-based
 _NAS_DEFAULT = (
-    "/Volumes/FRITZ.NAS/Volume/kraken_research_data"
-    if Path("/Volumes/FRITZ.NAS").exists()
-    else "/home/felix/mnt_nas/Volume/kraken_research_data"
+    "/mnt/fritz_nas/Volume/kraken/2026/ohlc"
 )
 LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", _NAS_DEFAULT))
 USE_LOCAL_TS = os.getenv("USE_LOCAL_TS", "1") == "1"

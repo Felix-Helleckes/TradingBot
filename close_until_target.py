@@ -5,11 +5,13 @@ until EUR wallet (ZEUR) >= target_eur or no more eligible positions.
 Runs while bot may be active; performs pre-flight tradebalance checks before each close.
 """
 import os, json, time
+from pathlib import Path
 from dotenv import load_dotenv
 from krakenex import API
 from order_lock import acquire_order_lock
 
-load_dotenv('/home/felix/TradingBot/.env')
+_HERE = Path(__file__).parent
+load_dotenv(_HERE / '.env')
 API_KEY=os.getenv('KRAKEN_API_KEY')
 API_SECRET=os.getenv('KRAKEN_API_SECRET')
 api=API(API_KEY, API_SECRET)
@@ -19,7 +21,7 @@ MIN_PROFIT_PCT = 3.0
 FEE_RATE = 0.002
 REQUIRED_PCT = MIN_PROFIT_PCT + (FEE_RATE*100)
 SLEEP_BETWEEN=1.0
-LOG='/home/felix/TradingBot/logs/close_until_target.log'
+LOG= _HERE / 'logs' / 'close_until_target.log'
 
 def log(msg):
     ts=time.strftime('%Y-%m-%d %H:%M:%S')
@@ -148,7 +150,7 @@ def main():
         log(f'New EUR wallet: {current_eur}')
         idx+=1
     log('Finished run; writing results')
-    out='/home/felix/TradingBot/logs/close_until_target_results.json'
+    out= _HERE / 'logs' / 'close_until_target_results.json'
     with open(out+'.tmp','w') as f:
         json.dump(results,f,indent=2)
     os.replace(out+'.tmp', out)

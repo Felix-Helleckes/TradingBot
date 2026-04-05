@@ -8,7 +8,7 @@ import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 INTERVALS = [1, 15, 60]  # 1m, 15m, 1h
-BASE_DIR = Path('/mnt/fritz_nas/Volume/kraken_research_data')
+BASE_DIR = Path('/mnt/fritz_nas/Volume/kraken/2026/ohlc')
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 sess = requests.Session()

@@ -14,7 +14,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
-LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", "/mnt/fritz_nas/Volume/kraken_daten/TimeAndSales_Combined"))
+LOCAL_TS_DIR = Path(os.getenv("KRAKEN_TS_DIR", "/mnt/fritz_nas/Volume/kraken/2025/time_sales"))
 OUT = Path("reports/main_dev_local_robust_eval.json")
 
 

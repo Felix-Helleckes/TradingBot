@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Incremental OHLC filler for kraken_daten on NAS, with sharding support.
+"""Incremental OHLC filler for the unified NAS kraken/ structure, with sharding support.
 
 Usage:
   fill_missing_ohlc.py [--shard-index N] [--shard-count M]
@@ -20,7 +20,7 @@ INTERVAL = 60  # minutes
 SLEEP_BETWEEN = 0.45  # seconds between public API calls (conservative)
 MAX_LOOPS = 1000
 
-BASES = [Path('/home/felix/mnt_nas/Volume/kraken_daten'), Path('/home/felix/mnt_nas/Volume/kraken_research_data')]
+BASES = [Path('/mnt/fritz_nas/Volume/kraken/2026/ohlc')]
 
 
 def parse_args():

@@ -38,7 +38,7 @@ class KrakenAPI:
         last_error = None
         for attempt in range(retries):
             if attempt > 0:
-                delay = self.rate_limit_delay * (4 ** attempt)  # aggressive backoff: 2s, 8s, 32s, 128s
+                delay = min(30.0, self.rate_limit_delay * (4 ** attempt))  # capped at 30s: 2s, 8s, 30s, 30s
                 self.logger.warning(
                     f"{endpoint} backing off {delay:.1f}s before attempt {attempt + 1}/{retries} …"
                 )

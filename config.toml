@@ -216,3 +216,8 @@ default_slippage_model = "fixed"
 notify_on = ["trade", "error"]
 notify_channel = "telegram"
 notify_min_profit_pct = 0.0
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+[paths]
+# NAS root directory (unified kraken/ folder). Override here if mount point changes.
+nas_root = "/mnt/fritz_nas/Volume/kraken"

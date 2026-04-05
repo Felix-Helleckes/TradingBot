@@ -1,11 +1,18 @@
 # Trading Bot Core Logic - Multi-Pair Analysis
 
+import json
 import logging
 import time
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from analysis import TechnicalAnalysis
 from utils import load_config
+
+# NAS root — read from config [paths] nas_root, fallback to default mount point
+def _resolve_nas_root(config: dict) -> Path:
+    return Path(config.get('paths', {}).get('nas_root', '/mnt/fritz_nas/Volume/kraken'))
+_TRADE_HISTORY_REFRESH_INTERVAL = 600  # seconds between Kraken API fetches (10 min)
 
 
 class TradingBot:
@@ -14,6 +21,7 @@ class TradingBot:
         self.config = config
         self.config_path = os.path.join(os.path.dirname(__file__), 'config.toml')
         self.logger = logging.getLogger(__name__)
+        self.nas_root = _resolve_nas_root(config)
 
         self.analysis_tool = TechnicalAnalysis(rsi_period=14, sma_short=20, sma_long=50)
 
@@ -167,6 +175,10 @@ class TradingBot:
         self._bear_mode_active = False          # current state
         self._bear_last_log_ts = 0              # throttle logging
 
+        # Trade history cache: avoids hitting Kraken API every loop iteration
+        self._trade_history_cache: dict = {}    # {trade_id: trade_dict}
+        self._trade_history_last_fetch: float = 0.0  # unix timestamp of last API fetch
+
     def _notify_pause(self, reason):
         """Log and attempt to notify an external channel when a trading pause activates."""
         try:
@@ -186,10 +198,10 @@ class TradingBot:
             if os.path.exists(script) and os.access(script, os.X_OK):
                 try:
                     subprocess.Popen([script, reason], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    self.logger.debug(f"notify_pause: could not run notifier script: {e}")
+        except Exception as e:
+            self.logger.warning(f"notify_pause: failed to write pause log: {e}")
 
     # ── Bear Shield ───────────────────────────────────────────────────────────
 
@@ -622,20 +634,84 @@ class TradingBot:
         except Exception as e:
             self.logger.error(f"Order reconciliation failed: {e}", exc_info=True)
 
-    def _sync_account_state(self):
+    def _sync_account_state(self, force_history: bool = False):
         self.get_crypto_holdings()
-        self.load_purchase_prices_from_history()
+        self.load_purchase_prices_from_history(force=force_history)
 
-    def load_purchase_prices_from_history(self):
+    def _load_trade_history_from_nas(self, year: int) -> dict:
+        """Load persisted trade history from NAS JSON file. Returns {} if unavailable."""
+        path = self.nas_root / str(year) / 'trade_history' / f'trades_{year}.json'
+        try:
+            if path.exists():
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                self.logger.info(f"Loaded {len(data)} trades from NAS cache ({path.name})")
+                return data
+        except Exception as e:
+            self.logger.warning(f"Could not load NAS trade history ({path}): {e}")
+        return {}
+
+    def _save_trade_history_to_nas(self, trades: dict, year: int) -> None:
+        """Persist trade history to NAS JSON file for future incremental loads."""
+        try:
+            trade_history_dir = self.nas_root / str(year) / 'trade_history'
+            trade_history_dir.mkdir(parents=True, exist_ok=True)
+            path = trade_history_dir / f'trades_{year}.json'
+            with open(path, 'w') as f:
+                json.dump(trades, f, separators=(',', ':'))
+            self.logger.debug(f"Saved {len(trades)} trades to NAS cache ({path.name})")
+        except Exception as e:
+            self.logger.warning(f"Could not save trade history to NAS ({e}) — NAS mounted?")
+
+    def _refresh_trade_history_cache(self, force: bool = False) -> None:
+        """Fetch trade history from Kraken API and merge into in-memory + NAS cache.
+
+        Uses TTL: only fetches if cache is older than _TRADE_HISTORY_REFRESH_INTERVAL seconds.
+        Always fetches after a trade (force=True).
+        Incremental: only requests trades newer than the last cached entry.
+        """
+        now = time.time()
+        if not force and (now - self._trade_history_last_fetch) < _TRADE_HISTORY_REFRESH_INTERVAL:
+            return
+
+        year = datetime.now(tz=timezone.utc).year
+        year_start_ts = int(datetime(year, 1, 1, tzinfo=timezone.utc).timestamp())
+
+        # Bootstrap from NAS on first run (cache is empty)
+        if not self._trade_history_cache:
+            self._trade_history_cache = self._load_trade_history_from_nas(year)
+
+        # Only fetch trades newer than the latest entry we already have
+        if self._trade_history_cache:
+            last_ts = max(float(t.get('time', 0)) for t in self._trade_history_cache.values())
+            fetch_start = max(year_start_ts, int(last_ts))
+        else:
+            fetch_start = year_start_ts
+
+        new_trades = self.api_client.get_trade_history(start=fetch_start, fetch_all=True)
+        if new_trades:
+            self._trade_history_cache.update(new_trades)
+            self._save_trade_history_to_nas(self._trade_history_cache, year)
+
+        self._trade_history_last_fetch = now
+        self.logger.debug(
+            f"Trade history cache refreshed: {len(self._trade_history_cache)} total trades "
+            f"(+{len(new_trades) if new_trades else 0} new, start={fetch_start})"
+        )
+
+    def load_purchase_prices_from_history(self, force: bool = False):
         """Rebuild per-pair average entry price + realized PnL from Kraken trade history.
 
         Logic:
         - BUY increases position size and weighted average entry (including fees)
         - SELL reduces position and realizes PnL (net of fees)
+
+        Uses an in-memory + NAS cache to avoid hitting the Kraken API on every loop iteration.
+        Pass force=True immediately after a trade to ensure fresh data.
         """
         try:
-            year_start_ts = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())
-            trades = self.api_client.get_trade_history(start=year_start_ts, fetch_all=True)
+            self._refresh_trade_history_cache(force=force)
+            trades = self._trade_history_cache
             if not trades:
                 return
 
@@ -1254,7 +1330,7 @@ class TradingBot:
         self.initial_balance_eur = initial_balance
         self.peak_balance = initial_balance
         self.daily_start_balance = initial_balance
-        self._sync_account_state()
+        self._sync_account_state(force_history=True)
         self._reconcile_open_orders()  # Detect orphaned orders from any previous crash
         self._refresh_cashflows_from_ledger(force=True)
 
@@ -1311,7 +1387,8 @@ class TradingBot:
                             pause_sec = int(self.pause_after_loss_streak_minutes * 60)
                             self.trading_paused_until_ts = max(self.trading_paused_until_ts, int(time.time()) + pause_sec)
                             self.logger.warning(f"Portfolio max-drawdown hit: {current_dd_pct:.2f}% >= {max_dd_cfg}%. Pausing buys for {self.pause_after_loss_streak_minutes} minutes.")
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Drawdown calculation failed: {e}")
                     current_dd_pct = 0.0
 
                 regime_state = "RISK_ON" if self._is_risk_on_regime() else "RISK_OFF"
@@ -1503,7 +1580,7 @@ class TradingBot:
                 self.peak_prices[pair] = max(self.peak_prices.get(pair, 0.0), price)
                 if self.entry_timestamps.get(pair) is None:
                     self.entry_timestamps[pair] = int(time.time())
-                self._sync_account_state()
+                self._sync_account_state(force_history=True)
                 self.logger.info(f"BUY ORDER SUCCESS: {result}")
                 self.logger.info(f"BUY SUMMARY: {pair} {volume:.6f} (~{volume*price:.2f} EUR)")
                 # initialize ATR stop if enabled
@@ -1554,7 +1631,7 @@ class TradingBot:
                 # clear stop info
                 if pair in self.stop_info:
                     del self.stop_info[pair]
-                self._sync_account_state()
+                self._sync_account_state(force_history=True)
                 self.logger.info(f"SELL ORDER SUCCESS: {result}")
                 self.logger.info(f"SELL SUMMARY: {pair} {volume:.6f} (~{volume*price:.2f} EUR)")
                 self.logger.info(

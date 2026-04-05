@@ -10,19 +10,21 @@ Strategy:
 WARNING: This will place live market/limit orders on Kraken. Use only when you want to liquidate.
 """
 import time, json, os
+from pathlib import Path
 from dotenv import load_dotenv
 from krakenex import API
 import toml
 from order_lock import acquire_order_lock
 
-load_dotenv('/home/felix/TradingBot/.env')
+_HERE = Path(__file__).parent
+load_dotenv(_HERE / '.env')
 API_KEY=os.getenv('KRAKEN_API_KEY')
 API_SECRET=os.getenv('KRAKEN_API_SECRET')
 api=API(API_KEY, API_SECRET)
 
-CFG_PATH = '/home/felix/TradingBot/config.toml'
-LOG = '/home/felix/TradingBot/logs/close_everything.log'
-OUT = '/home/felix/TradingBot/logs/close_everything_results.json'
+CFG_PATH = _HERE / 'config.toml'
+LOG = _HERE / 'logs' / 'close_everything.log'
+OUT = _HERE / 'logs' / 'close_everything_results.json'
 
 def log(msg):
     ts=time.strftime('%Y-%m-%d %H:%M:%S')
