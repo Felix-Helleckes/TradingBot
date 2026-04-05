@@ -1,4 +1,29 @@
 # Utility Functions for Kraken Trading Bot
+"""
+Utility Helpers
+===============
+Shared utilities for the Kraken trading bot.
+
+Functions
+---------
+``load_config(path)``
+    Load and parse ``config.toml``; raises ``FileNotFoundError`` if missing.
+
+``validate_config(config)``
+    Check that all required sections and keys are present.  Returns a bool
+    so callers can warn and fall back rather than crash.
+
+``nas_paths(cfg_path)``
+    Return a dict of resolved ``pathlib.Path`` objects for NAS directories:
+
+    - ``nas_root``  — mount point (default ``/mnt/fritz_nas/Volume/kraken``)
+    - ``ohlc_2026`` — 2026 OHLC data directory
+    - ``ohlc_2025`` — 2025 OHLC data directory
+    - ``bot_cache`` — shared cache for pre-processed indicator data
+
+All paths are sourced from the ``[paths]`` section of ``config.toml`` so
+moving the NAS mount only requires editing one place.
+"""
 
 import toml
 import logging

@@ -1,4 +1,40 @@
 # Technical Analysis Module for Trading Signals
+"""
+Technical Analysis Module
+=========================
+Provides ``TechnicalAnalysis`` — the signal engine used by ``TradingBot``.
+
+Responsibilities
+----------------
+- Maintains a rolling price history (up to 65 ticks) per pair, persisted to
+  ``data/history_buffer.json`` so indicators survive a bot restart without a
+  warm-up gap.
+- Pre-populates history from 15 m OHLC candles via ``seed_from_ohlc()`` on
+  startup so RSI/SMA are usable immediately.
+- Generates a ``(signal, score)`` tuple via ``generate_signal_with_score()``:
+
+  *Mean-reversion path* (``enable_mr_signals=True``):
+      RSI oversold (< ``mr_rsi_buy``) → ``BUY``; RSI overbought
+      (> ``mr_rsi_sell``) → ``SELL``.  Score driven by distance from 30/70.
+
+  *Trend/breakout path* (``enable_trend_signals=True``):
+      Price above Bollinger upper band + RSI ≥ 55 → ``BUY``; price below
+      lower band + RSI ≤ 45 → ``SELL``.
+
+  Score range: −50 … +50; positive = bullish bias.
+  The stronger path wins (highest |score| overrides the weaker one).
+  ATR and Williams %R provide a small additional boost when confirming.
+
+- Computes ATR (Average True Range) from price history for dynamic stops.
+- Multi-timeframe trend confirmation via ``check_mtf_trend()``.
+
+Signal engine mode flags (pushed from ``TradingBot`` after config load)
+-----------------------------------------------------------------------
+- ``enable_mr_signals``  — enable mean-reversion path (default: ``True``)
+- ``enable_trend_signals``— enable BB breakout path (default: ``True``)
+- ``mr_rsi_buy``         — RSI buy threshold (default: 33)
+- ``mr_rsi_sell``        — RSI sell threshold (default: 67)
+"""
 
 import logging
 import numpy as np
@@ -79,6 +115,11 @@ class TechnicalAnalysis:
         self.logger.info(f"[OHLC seed] {pair}: seeded {len(history)} closes from 15m candles")
 
     def calculate_rsi(self, prices):
+        """Compute the Relative Strength Index over the last ``rsi_period`` values.
+
+        Returns a float in [0, 100], or ``None`` if there are fewer than
+        ``rsi_period + 1`` data points.
+        """
         if len(prices) < self.rsi_period + 1:
             return None
         prices = np.array(prices)
@@ -113,6 +154,7 @@ class TechnicalAnalysis:
         return sma_short > sma_long
 
     def generate_signal(self, market_data):
+        """Convenience wrapper — returns only the signal string (ignores score)."""
         signal, _ = self.generate_signal_with_score(market_data)
         return signal
 

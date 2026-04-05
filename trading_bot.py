@@ -1,4 +1,71 @@
 # Trading Bot Core Logic - Multi-Pair Analysis
+"""
+Kraken Trading Bot — Core Engine
+=================================
+This module is the heart of the trading bot.  It contains the ``TradingBot``
+class that orchestrates the full trading lifecycle, plus a minimal ``Backtester``
+helper for offline strategy validation.
+
+Signal flow (high level)
+------------------------
+::
+
+    price_action.py  (bar-pattern helpers — optional context)
+         │
+    analysis.py  TechnicalAnalysis.generate_signal_with_score()
+         │         ↳ RSI mean-reversion  (enable_mr_signals)
+         │         ↳ Bollinger-Band breakout (enable_trend_signals)
+         │         returns (signal: str, score: float  [-50 … +50])
+         │
+    TradingBot.analyze_all_pairs()
+         │         ↳ fetches live ticker prices for all configured pairs
+         │         ↳ seeds price history from 60m OHLC when too sparse
+         │         ↳ picks the highest-scoring actionable pair
+         │
+    TradingBot.start_trading()  — main loop (~60 s cycle)
+         │         ↳ check_take_profit_or_stop_loss()  (exits first)
+         │         ↳ layered BUY guards (see below)
+         │         ↳ execute_buy_order() / execute_sell_order()
+         │              execute_open_short_order() / execute_close_short_order()
+         │
+    kraken_interface.py  KrakenAPI.place_order()
+                          ↳ exclusive order lock (order_lock.py)
+                          ↳ exponential back-off on rate-limit errors
+
+Layered BUY entry guards (all must pass before a buy is placed)
+---------------------------------------------------------------
+1. Not temporarily paused (loss-streak cooldown)
+2. Daily drawdown limit not hit
+3. Bear Shield not active (BTC above 4h EMA50)
+4. Regime filter: BTC benchmark score ≥ regime_min_score (RISK_ON)
+5. Signal score ≥ min_buy_score (default 15.0)
+6. Sentiment guard: no bad-news keywords in marquee file (optional)
+7. Open positions < max_open_positions
+8. MTF trend (1h SMA crossover) is bullish
+9. Trading hours filter (UTC window, optional)
+10. Volume filter: latest 15m candle ≥ volume_filter_min_ratio × 20-candle avg
+
+Key responsibilities of TradingBot
+-----------------------------------
+- Maintains per-pair state: holdings, entry price, peak price, stop levels,
+  short positions, trade metrics, cooldown timestamps.
+- Reconciles holdings and average entry price from Kraken trade history on
+  startup/restart (``load_purchase_prices_from_history``).
+- Hot-reloads ``config.toml`` every 5 minutes — no restart needed for tweaks.
+- Writes structured JSONL trade events to ``logs/trade_events.jsonl`` and a
+  human-readable CSV to ``reports/trade_journal.csv``.
+- Persists the price-history buffer to ``data/history_buffer.json`` so RSI/SMA
+  indicators survive a bot restart without a warm-up gap.
+- NAS paths (trade history, OHLC archives) are resolved via ``utils.nas_paths()``.
+
+Usage (called from main.py)
+---------------------------
+::
+
+    from trading_bot import TradingBot
+    bot = TradingBot(api_client, config)
+    bot.start_trading()
+"""
 
 import json
 import logging
@@ -8,6 +75,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from analysis import TechnicalAnalysis
 from utils import load_config
+
+# Load .env if python-dotenv is available (graceful fallback otherwise)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    _env_path = Path(__file__).parent / ".env"
+    if _env_path.exists():
+        for _line in _env_path.read_text().splitlines():
+            if "=" in _line and not _line.startswith("#"):
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+from core import notifier as _notifier
 
 # NAS root — read from config [paths] nas_root, fallback to default mount point
 def _resolve_nas_root(config: dict) -> Path:
@@ -265,6 +346,11 @@ class TradingBot:
         return sold_any
 
     def _update_airbag_history(self, pair, price):
+        """Append (timestamp, price) to the rolling flash-crash window for *pair*.
+
+        The window is kept to the last ``airbag_window_minutes`` minutes.
+        Called every cycle from ``analyze_all_pairs`` before the airbag check.
+        """
         now = time.time()
         history = self.price_history_airbag.get(pair, [])
         history.append((now, price))
@@ -273,6 +359,12 @@ class TradingBot:
         self.price_history_airbag[pair] = [h for h in history if h[0] >= cutoff]
         
     def _check_airbag_trigger(self, pair):
+        """Return True if price has dropped ≥ airbag_drop_threshold% within the airbag window.
+
+        When triggered, the caller (``analyze_all_pairs``) immediately issues a
+        market sell to exit the position — this is the "flash-crash airbag".
+        Requires at least 2 data points; returns False if insufficient history.
+        """
         history = self.price_history_airbag.get(pair, [])
         if len(history) < 2:
             return False
@@ -308,6 +400,13 @@ class TradingBot:
             return False
 
     def _init_pair_state(self, pairs):
+        """Initialise all per-pair state dicts for newly added pairs.
+
+        Called once at startup for all configured pairs and again whenever
+        ``reload_config`` detects that new pairs have been added to the config.
+        Safe to call multiple times — ``setdefault`` prevents overwriting
+        existing state for pairs that are already active.
+        """
         for pair in pairs:
             self.pair_signals.setdefault(pair, "HOLD")
             self.holdings.setdefault(pair, 0.0)
@@ -466,6 +565,13 @@ class TradingBot:
         return valid_requested
 
     def reload_config(self):
+        """Hot-reload config.toml and apply all changed settings without restarting.
+
+        Called automatically every ``config_reload_interval`` seconds from the
+        main loop.  Detects newly added trade pairs and initialises their state.
+        Existing holdings and entry prices are preserved across reloads.
+        Returns True on success, False if the config file cannot be parsed.
+        """
         try:
             new_config = load_config(self.config_path)
             if not new_config:
@@ -548,6 +654,7 @@ class TradingBot:
             return False
 
     def get_eur_balance(self):
+        """Return current EUR (ZEUR) balance from Kraken; returns 0.0 on error."""
         try:
             balance = self.api_client.get_account_balance()
             if balance:
@@ -558,6 +665,11 @@ class TradingBot:
             return 0.0
 
     def get_crypto_holdings(self):
+        """Refresh ``self.holdings`` dict from Kraken account balance.
+
+        Maps Kraken asset codes (e.g. 'XXBT') back to our pair keys
+        (e.g. 'XBTEUR').  Only updates pairs listed in ``self.trade_pairs``.
+        """
         try:
             balance = self.api_client.get_account_balance()
             if not balance:
@@ -635,6 +747,13 @@ class TradingBot:
             self.logger.error(f"Order reconciliation failed: {e}", exc_info=True)
 
     def _sync_account_state(self, force_history: bool = False):
+        """Refresh local holdings and purchase-price state from the Kraken API.
+
+        Called after every trade and at startup.  When ``force_history=True``
+        (post-trade or on first boot) it bypasses the 10-minute cache and
+        re-fetches the full trade history from Kraken / NAS to recompute the
+        average entry price.
+        """
         self.get_crypto_holdings()
         self.load_purchase_prices_from_history(force=force_history)
 
@@ -854,6 +973,13 @@ class TradingBot:
         return trend + momentum - vol_penalty
 
     def _is_risk_on_regime(self):
+        """Return True when the market regime is considered bullish (RISK_ON).
+
+        When ``enable_mtf_regime_scoring`` is on, uses the composite MTF score
+        (short/long SMA + RSI across multiple timeframes) for the BTC benchmark.
+        Falls back to the simpler pair-score comparison against ``regime_min_score``.
+        Always returns True when the regime filter is disabled in config.
+        """
         if not self.enable_regime_filter:
             return True
 
@@ -893,6 +1019,17 @@ class TradingBot:
             return 0.0
 
     def _allocation_multiplier(self):
+        """Return a [0.2, 1.25] multiplier applied to every order size.
+
+        Combines two scaling factors:
+        - Regime factor: 1.0 in RISK_ON, ``risk_off_allocation_multiplier``
+          (default 0.5) in RISK_OFF — cuts size in half during bear markets.
+        - Volatility factor: ``target_volatility_pct / current_vol``; reduces
+          size when BTC volatility is elevated above the target (default 1.6%).
+
+        The product is clamped to [0.2, 1.25] so orders never vanish entirely
+        or exceed 125 % of base size.
+        """
         base = 1.0 if self._is_risk_on_regime() else self.risk_off_allocation_multiplier
         if not self.enable_volatility_targeting:
             return base
@@ -952,9 +1089,11 @@ class TradingBot:
             return True  # fail open — don't block trades on API errors
 
     def _is_temporarily_paused(self):
+        """Return True while the bot is in a loss-streak or drawdown cooldown period."""
         return time.time() < self.trading_paused_until_ts
 
     def _available_eur_for_buy(self):
+        """Return spendable EUR after reserving 1.5 % for fees and slippage."""
         # SMART FEE RESERVE: leave 1.5% for fees and slippage to avoid 'Insufficient funds'
         return max(0.0, self.get_eur_balance() * 0.985)
 
@@ -1024,6 +1163,7 @@ class TradingBot:
         return current_balance - self._adjusted_reference_balance()
 
     def _count_open_positions(self):
+        """Return the number of pairs with an active long position above minimum volume."""
         count = 0
         for pair in self.trade_pairs:
             if self.holdings.get(pair, 0) >= self._get_min_volume(pair):
@@ -1031,9 +1171,11 @@ class TradingBot:
         return count
 
     def _is_on_cooldown(self, pair):
+        """Return True if the per-pair cooldown period has not yet elapsed since the last trade."""
         return (time.time() - self.last_trade_at.get(pair, 0)) < self.trade_cooldown_sec
 
     def _is_global_cooldown(self):
+        """Return True if the global inter-trade cooldown has not yet elapsed."""
         return (time.time() - self.last_global_trade_at) < self.global_trade_cooldown_sec
 
     def _log_empty_sell_signal_throttled(self, pair):
@@ -1121,6 +1263,14 @@ class TradingBot:
         return profit_pct >= self._required_take_profit_percent(pair)
 
     def _update_trade_metrics(self, pair, pnl_eur):
+        """Update per-pair win/loss counters and trigger loss-streak pause if needed.
+
+        A winning trade (pnl_eur ≥ 0) resets the consecutive-loss counter and
+        lifts any active loss-streak pause immediately.  After
+        ``max_consecutive_losses`` losses the bot pauses new buys for
+        ``pause_after_loss_streak_minutes`` minutes and recalculates the Kelly
+        fraction for position sizing.
+        """
         pnl_eur = float(pnl_eur)
         m = self.trade_metrics.setdefault(pair, {"closed": 0, "wins": 0, "losses": 0, "sum_pnl": 0.0})
         m["closed"] += 1
@@ -1271,6 +1421,19 @@ class TradingBot:
             self.logger.warning(f"OHLC warmup failed for {pair}: {e}")
 
     def analyze_all_pairs(self):
+        """Fetch live prices, generate signals, and pick the best actionable pair.
+
+        For every pair in ``self.trade_pairs``:
+        1. Fetch current ticker price from Kraken.
+        2. If price history is too sparse (<50 ticks), seed it from 60m OHLC candles.
+        3. Update the flash-crash airbag history; trigger emergency sell if tripped.
+        4. Call ``TechnicalAnalysis.generate_signal_with_score()`` to get
+           a (signal, score) tuple.
+
+        Returns (best_pair, best_signal, best_score) where *best_pair* is the
+        pair with the highest |score| among actionable BUY/SELL signals.
+        Returns (None, "HOLD", 0) when no pair has an actionable signal.
+        """
         best_pair = None
         best_signal = "HOLD"
         best_score = 0
@@ -1312,6 +1475,26 @@ class TradingBot:
         return best_pair, best_signal, best_score
 
     def start_trading(self):
+        """Run the main trading loop until the target balance is reached or Ctrl-C.
+
+        Startup sequence:
+        1. Fetch initial EUR balance and fix it as the performance baseline.
+        2. Sync account state (holdings + entry prices from Kraken history).
+        3. Reconcile any open orders left from a previous crash.
+        4. Refresh deposit/withdrawal cashflows from the Kraken ledger.
+
+        Each ~60-second cycle:
+        - Resets daily PnL baseline at midnight.
+        - Calls ``analyze_all_pairs()`` to find the best signal.
+        - Evaluates take-profit / stop-loss exits (hard, ATR, trailing,
+          break-even, time-stop) via ``check_take_profit_or_stop_loss()``.
+        - Checks the bear shield (BTC 4h trend) and parks in FIAT if triggered.
+        - Runs all BUY entry guards before calling ``execute_buy_order()``.
+        - Checks for SELL signals and short opportunities.
+        - Hot-reloads config every ``config_reload_interval`` seconds.
+
+        Stops automatically when ``current_balance >= target_balance_eur``.
+        """
         self.logger.info("=" * 60)
         self.logger.info("TRADING BOT STARTED - MULTI-PAIR MODE")
         self.logger.info(f"Watching: {', '.join(self.trade_pairs)}")
@@ -1330,6 +1513,7 @@ class TradingBot:
         self.initial_balance_eur = initial_balance
         self.peak_balance = initial_balance
         self.daily_start_balance = initial_balance
+        self._load_cumulative_pnl_state(initial_balance)
         self._sync_account_state(force_history=True)
         self._reconcile_open_orders()  # Detect orphaned orders from any previous crash
         self._refresh_cashflows_from_ledger(force=True)
@@ -1560,6 +1744,14 @@ class TradingBot:
             self.logger.error(f"Error writing trade journal: {e}")
 
     def execute_buy_order(self, pair, price):
+        """Place a post-only (maker) spot BUY order for *pair* at *price*.
+
+        Position size is determined by ``_get_dynamic_trade_amount_eur()``
+        (allocation % of available EUR, ATR-scaled, regime-adjusted).
+        After a successful fill the ATR stop level is initialised and the
+        trade is journalled to CSV and JSONL.  Rejects if available EUR is
+        below ``min_trade_eur``.
+        """
         try:
             available_eur = self._available_eur_for_buy()
             min_trade_eur = float(self.config.get('risk_management', {}).get('min_trade_eur', 10.0))
@@ -1593,12 +1785,27 @@ class TradingBot:
                 # journal buy
                 self._journal_trade('BUY', pair, volume, price, 0.0, 'BUY_EXECUTED', extra={'result': result})
                 print(f"\n[BUY] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
+                _notifier.send(
+                    f"🟢 <b>BUY</b> #{self.trade_count}\n"
+                    f"Pair: {pair}\n"
+                    f"Volume: {volume:.6f}  (~{volume*price:.2f} EUR)\n"
+                    f"Price: {price:.4f} EUR"
+                )
             else:
                 self.logger.error(f"BUY ORDER FAILED for {pair}")
         except Exception as e:
             self.logger.error(f"Error executing buy order: {e}", exc_info=True)
 
     def execute_sell_order(self, pair, price, require_profit_target=True, reason=None):
+        """Place a post-only (maker) spot SELL order to close the long position.
+
+        When ``require_profit_target=True`` (default), the sell is blocked
+        unless ``_can_sell_profit_target()`` passes (i.e. profit ≥ required TP
+        after slippage buffer).  Pass ``require_profit_target=False`` for
+        emergency exits (airbag, bear shield, time-stop).
+
+        Clears position state, updates trade metrics, and journals the trade.
+        """
         try:
             volume = self.holdings.get(pair, 0)
             if volume < self._get_min_volume(pair):
@@ -1641,12 +1848,27 @@ class TradingBot:
                 # journal sell
                 self._journal_trade('SELL', pair, volume, price, est_profit_eur, reason or 'SELL_EXECUTED')
                 print(f"\n[SELL] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
+                pnl_sign = "🟢" if est_profit_eur >= 0 else "🔴"
+                _notifier.send(
+                    f"{pnl_sign} <b>SELL</b> #{self.trade_count}\n"
+                    f"Pair: {pair}\n"
+                    f"Volume: {volume:.6f}  (~{volume*price:.2f} EUR)\n"
+                    f"Price: {price:.4f} EUR\n"
+                    f"P&amp;L est.: {est_profit_eur:+.2f} EUR"
+                )
             else:
                 self.logger.error(f"SELL ORDER FAILED for {pair}")
         except Exception as e:
             self.logger.error(f"Error executing sell order: {e}", exc_info=True)
 
     def execute_open_short_order(self, pair, price):
+        """Open a leveraged short position on *pair* at *price*.
+
+        Uses the configured ``short_leverage`` (default 2×) via Kraken margin.
+        Position notional is capped at ``max_short_notional_eur``.  Only placed
+        when no short is already open for this pair.  Blocked when
+        ``enable_live_shorts`` is False in config.
+        """
         try:
             if not self.enable_live_shorts:
                 return
@@ -1672,12 +1894,24 @@ class TradingBot:
                 self.logger.info(f"SHORT OPEN SUCCESS: {result}")
                 self.logger.info(f"SHORT OPEN SUMMARY: {pair} {volume:.6f} (~{notional:.2f} EUR)")
                 print(f"\n[SHORT OPEN] {volume:.6f} {pair} (~{notional:.2f} EUR) - Trade #{self.trade_count}")
+                _notifier.send(
+                    f"🔻 <b>SHORT OPEN</b> #{self.trade_count}\n"
+                    f"Pair: {pair}\n"
+                    f"Volume: {volume:.6f}  (~{notional:.2f} EUR)\n"
+                    f"Price: {price:.4f} EUR  |  Leverage: {self.short_leverage}x"
+                )
             else:
                 self.logger.error(f"SHORT OPEN FAILED for {pair}")
         except Exception as e:
             self.logger.error(f"Error opening short order: {e}", exc_info=True)
 
     def execute_close_short_order(self, pair, price):
+        """Close an open leveraged short position on *pair* at *price*.
+
+        Places a reduce-only BUY order with the same leverage as the original
+        short.  Computes and records estimated P&L: profit when price fell from
+        entry, loss when it rose.  Clears short state and journals the trade.
+        """
         try:
             qty = self.short_qty.get(pair, 0.0)
             entry = self.short_entry_prices.get(pair, 0.0)
@@ -1706,6 +1940,14 @@ class TradingBot:
                 self.logger.info(f"SHORT PNL ESTIMATE {pair}: {pnl_eur:.2f} EUR ({pnl_pct:.2f}%)")
                 self._update_trade_metrics(pair, pnl_eur)
                 print(f"\n[SHORT CLOSE] {qty:.6f} {pair} - Trade #{self.trade_count}")
+                pnl_sign = "🟢" if pnl_eur >= 0 else "🔴"
+                _notifier.send(
+                    f"{pnl_sign} <b>SHORT CLOSE</b> #{self.trade_count}\n"
+                    f"Pair: {pair}\n"
+                    f"Volume: {qty:.6f}  (~{qty*price:.2f} EUR)\n"
+                    f"Entry: {entry:.4f} EUR  |  Exit: {price:.4f} EUR\n"
+                    f"P&amp;L est.: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)"
+                )
             else:
                 self.logger.error(f"SHORT CLOSE FAILED for {pair}")
         except Exception as e:

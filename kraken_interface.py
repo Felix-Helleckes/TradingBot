@@ -1,4 +1,33 @@
 # Kraken API Interface Wrapper
+"""
+Kraken API Wrapper
+==================
+Provides ``KrakenAPI`` — a thin, resilient wrapper around ``krakenex.API``.
+
+All private endpoints are called via ``_query_private_with_backoff()`` which
+retries up to 5 times with exponential back-off (2 s → 8 s → 30 s) on
+rate-limit or temporary lockout errors returned by Kraken.
+
+Public endpoints use ``_query_public_with_backoff()`` with up to 4 retries.
+
+Key methods
+-----------
+- ``get_account_balance()``       — EUR/crypto balances
+- ``get_market_data(pair)``       — current ticker (last price, 24h volume)
+- ``get_ohlc_data(pair, interval)``— OHLC candles (15m, 60m, 240m …)
+- ``place_order(...)``            — unified spot + margin order entry
+- ``place_order_with_fallback()`` — post-only with automatic market fallback
+- ``get_trade_history(...)``      — paginated closed-trade history
+- ``get_ledgers(...)``            — paginated ledger (deposits, withdrawals, fees)
+- ``get_open_orders()``           — currently open orders
+- ``cancel_order(order_id)``      — cancel a single open order
+
+Order locking
+-------------
+``place_order()`` acquires an exclusive file lock via ``order_lock.py``
+before submitting to Kraken, preventing duplicate orders when a signal
+fires faster than the API roundtrip.
+"""
 
 import krakenex
 import logging
