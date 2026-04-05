@@ -1162,7 +1162,49 @@ class TradingBot:
     def _adjusted_pnl_eur(self, current_balance):
         return current_balance - self._adjusted_reference_balance()
 
-    def _count_open_positions(self):
+    # ------------------------------------------------------------------
+    # Persistent cumulative P&L — survives restarts
+    # ------------------------------------------------------------------
+
+    def _pnl_state_path(self) -> Path:
+        """Return path to the persistent P&L state file."""
+        return Path(__file__).parent / "data" / "pnl_state.json"
+
+    def _load_cumulative_pnl_state(self, current_balance: float) -> None:
+        """Load or initialise the persistent P&L baseline.
+
+        On the very first run (no state file) the current balance is stored
+        as the all-time start.  On subsequent runs the stored ``start_eur``
+        value is restored so cumulative P&L is always relative to the very
+        first time the bot ran.
+        """
+        path = self._pnl_state_path()
+        try:
+            if path.exists():
+                state = json.loads(path.read_text())
+                self.cumulative_start_eur: float = float(state.get("start_eur", current_balance))
+                self.logger.info(
+                    f"Loaded P&L baseline: {self.cumulative_start_eur:.2f} EUR "
+                    f"(started {state.get('created_at', 'unknown')})"
+                )
+            else:
+                self.cumulative_start_eur = current_balance
+                state = {
+                    "start_eur": current_balance,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(state, indent=2))
+                self.logger.info(f"Created P&L baseline: {current_balance:.2f} EUR")
+        except Exception as exc:
+            self.logger.warning(f"Could not load P&L state: {exc}")
+            self.cumulative_start_eur = current_balance
+
+    def cumulative_pnl_eur(self, current_balance: float) -> float:
+        """Return total P&L since the bot was first ever started."""
+        return current_balance - getattr(self, "cumulative_start_eur", current_balance)
+
+
         """Return the number of pairs with an active long position above minimum volume."""
         count = 0
         for pair in self.trade_pairs:
@@ -1594,7 +1636,7 @@ class TradingBot:
                     f"[{iteration}] {pair_status} | {regime_state}/{pause_state} | Best: {best_pair or 'NONE'} ({best_signal}) "
                     f"| Bal: {current_balance:.2f}EUR | Start: {self.initial_balance_eur:.2f}EUR "
                     f"| NetCF: +{self.net_deposits_eur:.2f}/-{self.net_withdrawals_eur:.2f}EUR "
-                    f"| AdjPnL: {adjusted_pnl:+.2f}EUR | Trades: {self.trade_count}"
+                    f"| AdjPnL: {adjusted_pnl:+.2f}EUR | TotalPnL: {self.cumulative_pnl_eur(current_balance):+.2f}EUR | Trades: {self.trade_count}"
                 )
                 self.logger.info(status_msg)
                 print(f"\r{status_msg}", end="", flush=True)

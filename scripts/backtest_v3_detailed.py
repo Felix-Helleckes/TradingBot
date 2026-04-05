@@ -64,7 +64,10 @@ _BASE_TP_PCT    = float(_RM.get("take_profit_percent", 3.0))
 _MAX_TP_PCT     = float(_RM.get("max_take_profit_percent", 7.0))
 _ATR_PERIOD     = int(_RM.get("atr_period", 14))
 
-PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
+# Read pairs from live config so backtest matches the real bot's universe
+PAIRS = _CFG.get("bot_settings", {}).get("trade_pairs", ["XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR"])
+# Regime benchmark: first pair in PAIRS is assumed to be the most liquid (XXBTZEUR)
+_BACKTEST_BENCHMARK = PAIRS[0]
 _NAS = _CFG.get("paths", {})
 _NAS_ROOT = Path(_NAS.get("nas_root", "/mnt/fritz_nas/Volume/kraken"))
 _BOT_CACHE = Path(_NAS.get("nas_bot_cache", str(_NAS_ROOT / "bot_cache")))
@@ -438,7 +441,7 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
             signal[p] = s
             score[p] = sc
 
-        benchmark_score = score.get("XETHZEUR", 0.0)
+        benchmark_score = score.get(_BACKTEST_BENCHMARK, 0.0)
         risk_on = benchmark_score >= _REGIME_MIN_SCORE
 
         eq_now = equity()
@@ -517,7 +520,7 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
             continue
 
         # volatility targeting proxy on benchmark history
-        bench_hist = list(hist.get("XETHZEUR", []))[-20:]
+        bench_hist = list(hist.get(_BACKTEST_BENCHMARK, []))[-20:]
         bench_vol = 0.0
         if len(bench_hist) >= 20:
             mean = float(np.mean(bench_hist))
