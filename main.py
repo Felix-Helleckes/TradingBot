@@ -5,6 +5,7 @@ import os
 import sys
 import logging
 import atexit
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
 from kraken_interface import KrakenAPI
@@ -65,20 +66,28 @@ log_dir = Path(config['logging'].get('log_file_path', 'logs/bot_activity.log')).
 log_dir.mkdir(parents=True, exist_ok=True)
 
 log_file = config['logging']['log_file_path'] if config['logging'].get('log_to_file', True) else None
-if log_file and config['logging'].get('fresh_log_on_start', True):
+
+root_logger = logging.getLogger()
+root_logger.setLevel(config['logging'].get('log_level', 'INFO'))
+_fmt = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+if log_file:
     try:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        with open(log_file, 'w') as f:
-            f.write('')
+        _fh = RotatingFileHandler(
+            log_file,
+            maxBytes=5 * 1024 * 1024,  # 5 MB per file
+            backupCount=5,
+            encoding='utf-8',
+        )
+        _fh.setFormatter(_fmt)
+        root_logger.addHandler(_fh)
     except Exception as e:
-        print(f"Warning: Could not reset log file {log_file}: {e}")
+        print(f"Warning: Could not configure log file {log_file}: {e}")
 
-logging.basicConfig(
-    level=config['logging'].get('log_level', 'INFO'),
-    filename=log_file,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    force=True
-)
+_sh = logging.StreamHandler(sys.stdout)
+_sh.setFormatter(_fmt)
+root_logger.addHandler(_sh)
 
 logger = logging.getLogger(__name__)
 api_key = os.getenv('KRAKEN_API_KEY', '')

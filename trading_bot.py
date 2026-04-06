@@ -96,6 +96,20 @@ def _resolve_nas_root(config: dict) -> Path:
 _TRADE_HISTORY_REFRESH_INTERVAL = 600  # seconds between Kraken API fetches (10 min)
 
 
+def _sd_notify_watchdog() -> None:
+    """Send WATCHDOG=1 ping to systemd via the NOTIFY_SOCKET (no extra packages needed)."""
+    import socket
+    sock_path = os.environ.get("NOTIFY_SOCKET")
+    if not sock_path:
+        return
+    try:
+        addr = "\0" + sock_path[1:] if sock_path.startswith("@") else sock_path
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.sendto(b"WATCHDOG=1", addr)
+    except Exception:
+        pass
+
+
 class TradingBot:
     def __init__(self, api_client, config):
         self.api_client = api_client
@@ -208,6 +222,7 @@ class TradingBot:
         self.start_time = datetime.now()
         self.last_config_reload = datetime.now()
         self.config_reload_interval = 300
+        self.loop_interval_sec = int(self.config.get('bot_settings', {}).get('loop_interval_seconds', 60))
         self.daily_start_balance = None
         self.initial_balance_eur = None
         self.start_timestamp = int(time.time())
@@ -650,6 +665,7 @@ class TradingBot:
             self.bear_log_interval_minutes = int(bear_cfg.get('bear_log_interval_minutes', self.bear_log_interval_minutes))
 
             self.last_config_reload = datetime.now()
+            self.loop_interval_sec = int(self.config.get('bot_settings', {}).get('loop_interval_seconds', self.loop_interval_sec))
             return True
         except Exception as e:
             self.logger.error(f"Error reloading config: {e}")
@@ -1214,6 +1230,13 @@ class TradingBot:
                 count += 1
         return count
 
+    def _count_open_positions(self) -> int:
+        """Return the number of pairs where holdings exceed the minimum tradeable volume."""
+        return sum(
+            1 for pair in self.pairs
+            if self.holdings.get(pair, 0.0) >= self._get_min_volume(pair)
+        )
+
     def _is_on_cooldown(self, pair):
         """Return True if the per-pair cooldown period has not yet elapsed since the last trade."""
         return (time.time() - self.last_trade_at.get(pair, 0)) < self.trade_cooldown_sec
@@ -1569,176 +1592,183 @@ class TradingBot:
             iteration = 0
             while True:
                 iteration += 1
-
-                current_balance = self.get_eur_balance()
-
-                # Daily reset of daily_start_balance
-                now = datetime.now()
-                last_reset = datetime.fromtimestamp(self.last_daily_reset_ts)
-                if now.day != last_reset.day or now.month != last_reset.month or now.year != last_reset.year:
-                    self.daily_start_balance = current_balance
-                    self.last_daily_reset_ts = int(time.time())
-                    self.logger.info(f"Daily start balance reset to {self.daily_start_balance:.2f} EUR")
-                if current_balance >= self.target_balance_eur:
-                    self.logger.info(f"TARGET REACHED! Balance: {current_balance:.2f} EUR")
-                    print(f"\nTARGET REACHED! Balance: {current_balance:.2f} EUR")
-                    break
-
-                best_pair, best_signal, best_score = self.analyze_all_pairs()
-                self._sync_account_state()
-                
-                # Sentiment scan (opt-in)
-                self.sentiment_active = self._scan_news_sentiment() if self.enable_sentiment_guard else False
-
-                # Take profit / stop loss first
-                risk_pair, risk_type, change = self.check_take_profit_or_stop_loss()
-                if risk_pair:
-                    price = self.pair_prices.get(risk_pair, 0)
-                    print(f"\n[{risk_type}] {risk_pair} at {change:.2f}%")
-                    if str(risk_type).startswith("SHORT_"):
-                        self.execute_close_short_order(risk_pair, price)
-                    else:
-                        self.execute_sell_order(risk_pair, price)
-
-                self._refresh_cashflows_from_ledger()
-                adjusted_pnl = self._adjusted_pnl_eur(current_balance)
-                # update peak balance and compute portfolio drawdown
                 try:
-                    self.peak_balance = max(getattr(self, 'peak_balance', current_balance), current_balance)
-                    current_dd_pct = 0.0
-                    if self.peak_balance > 0:
-                        current_dd_pct = ((self.peak_balance - current_balance) / self.peak_balance) * 100.0
-                        # enforce portfolio max drawdown circuit breaker
-                        max_dd_cfg = float(self.config.get('risk_management', {}).get('max_drawdown_percent', 10.0))
-                        if current_dd_pct >= max_dd_cfg:
-                            pause_sec = int(self.pause_after_loss_streak_minutes * 60)
-                            self.trading_paused_until_ts = max(self.trading_paused_until_ts, int(time.time()) + pause_sec)
-                            self.logger.warning(f"Portfolio max-drawdown hit: {current_dd_pct:.2f}% >= {max_dd_cfg}%. Pausing buys for {self.pause_after_loss_streak_minutes} minutes.")
-                except Exception as e:
-                    self.logger.debug(f"Drawdown calculation failed: {e}")
-                    current_dd_pct = 0.0
+                    current_balance = self.get_eur_balance()
 
-                regime_state = "RISK_ON" if self._is_risk_on_regime() else "RISK_OFF"
-                pause_state = "PAUSED" if self._is_temporarily_paused() else "ACTIVE"
+                    # Daily reset of daily_start_balance
+                    now = datetime.now()
+                    last_reset = datetime.fromtimestamp(self.last_daily_reset_ts)
+                    if now.day != last_reset.day or now.month != last_reset.month or now.year != last_reset.year:
+                        self.daily_start_balance = current_balance
+                        self.last_daily_reset_ts = int(time.time())
+                        self.logger.info(f"Daily start balance reset to {self.daily_start_balance:.2f} EUR")
+                    if current_balance >= self.target_balance_eur:
+                        self.logger.info(f"TARGET REACHED! Balance: {current_balance:.2f} EUR")
+                        print(f"\nTARGET REACHED! Balance: {current_balance:.2f} EUR")
+                        break
 
-                label_map = {
-                    "XBTEUR": "BTC", "XXBTZEUR": "BTC",
-                    "ETHEUR": "ETH", "XETHZEUR": "ETH",
-                    "SOLEUR": "SOL",
-                    "ADAEUR": "ADA",
-                    "DOTEUR": "DOT",
-                    "XRPEUR": "XRP", "XXRPZEUR": "XRP",
-                    "LINKEUR": "LINK",
-                }
-                pair_status = " ".join([
-                    f"{label_map.get(p, p[:4])}:{self.pair_signals.get(p, '?')}" for p in self.trade_pairs
-                ])
-                status_msg = (
-                    f"[{iteration}] {pair_status} | {regime_state}/{pause_state} | Best: {best_pair or 'NONE'} ({best_signal}) "
-                    f"| Bal: {current_balance:.2f}EUR | Start: {self.initial_balance_eur:.2f}EUR "
-                    f"| NetCF: +{self.net_deposits_eur:.2f}/-{self.net_withdrawals_eur:.2f}EUR "
-                    f"| AdjPnL: {adjusted_pnl:+.2f}EUR | TotalPnL: {self.cumulative_pnl_eur(current_balance):+.2f}EUR | Trades: {self.trade_count}"
-                )
-                self.logger.info(status_msg)
-                print(f"\r{status_msg}", end="", flush=True)
+                    best_pair, best_signal, best_score = self.analyze_all_pairs()
+                    self._sync_account_state()
+                    
+                    # Sentiment scan (opt-in)
+                    self.sentiment_active = self._scan_news_sentiment() if self.enable_sentiment_guard else False
 
-                if iteration % 10 == 0:
-                    metric_parts = []
-                    for p in self.trade_pairs:
-                        m = self.trade_metrics.get(p, {})
-                        closed = int(m.get("closed", 0))
-                        if closed <= 0:
-                            continue
-                        winrate = (m.get("wins", 0) / closed) * 100.0
-                        avg_pnl = m.get("sum_pnl", 0.0) / closed
-                        metric_parts.append(f"{p}: WR {winrate:.0f}% avg {avg_pnl:.2f}EUR")
-                    if metric_parts:
-                        self.logger.info("METRICS | " + " | ".join(metric_parts))
-
-                # ── Bear Shield: check 4h trend and park in FIAT if confirmed downtrend ──
-                if self.enable_bear_shield:
-                    bear_now = self._is_bear_market()
-                    if bear_now and not self._bear_mode_active:
-                        self.logger.warning(
-                            f"BEAR SHIELD ACTIVATED: {self.bear_benchmark_pair} below EMA{self.bear_ema_period} "
-                            f"on 4h for {self.bear_confirm_candles} candles — selling all positions, parking in EUR"
-                        )
-                        self._bear_mode_active = True
-                        self._bear_shield_exit_all()
-                    elif not bear_now and self._bear_mode_active:
-                        self.logger.info("BEAR SHIELD DEACTIVATED: trend turned bullish — resuming normal trading")
-                        self._bear_mode_active = False
-                    elif bear_now:
-                        now_ts = time.time()
-                        if (now_ts - self._bear_last_log_ts) >= self.bear_log_interval_minutes * 60:
-                            self.logger.info(
-                                f"BEAR SHIELD: still in bear mode ({self.bear_benchmark_pair} < EMA{self.bear_ema_period} on 4h)"
-                            )
-                            self._bear_last_log_ts = now_ts
-
-                if best_pair and best_signal != "HOLD" and not self._is_on_cooldown(best_pair) and not self._is_global_cooldown():
-                    price = self.pair_prices.get(best_pair, 0)
-                    if best_signal == "BUY":
-                        score = float(self.pair_scores.get(best_pair, 0.0))
-                        if self._is_temporarily_paused():
-                            self.logger.warning("BUY paused: loss-streak cooling period active")
-                            self.kelly_fraction = self._calculate_kelly_fraction()
-                        elif self._daily_drawdown_hit():
-                            self.logger.warning("BUY paused: daily loss limit reached")
-                            self.kelly_fraction = self._calculate_kelly_fraction()
-                        elif self._bear_mode_active:
-                            self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
-                        elif self.enable_regime_filter and not self._is_risk_on_regime():
-                            self.logger.info("BUY skipped: regime filter is RISK_OFF")
-                        elif score < self.min_buy_score:
-                            self.logger.info(f"BUY skipped for {best_pair}: weak score {score:.2f} < min {self.min_buy_score:.2f}")
-                        elif self.sentiment_active:
-                            self.logger.info(f"BUY skipped for {best_pair}: sentiment guard active")
-                        elif self._count_open_positions() >= self.max_open_positions:
-                            self.logger.info("BUY skipped: max open positions reached")
-                        elif not self._is_mtf_trend_bullish(best_pair):
-                            self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
-                        elif not self._is_trading_hours():
-                            self.logger.info(
-                                f"BUY skipped: outside trading hours "
-                                f"({self.trading_hours_start_utc}:00-{self.trading_hours_end_utc}:00 UTC)"
-                            )
-                        elif not self._has_sufficient_volume(best_pair):
-                            pass  # already logged inside _has_sufficient_volume
+                    # Take profit / stop loss first
+                    risk_pair, risk_type, change = self.check_take_profit_or_stop_loss()
+                    if risk_pair:
+                        price = self.pair_prices.get(risk_pair, 0)
+                        print(f"\n[{risk_type}] {risk_pair} at {change:.2f}%")
+                        if str(risk_type).startswith("SHORT_"):
+                            self.execute_close_short_order(risk_pair, price)
                         else:
-                            self.execute_buy_order(best_pair, price)
-                    elif best_signal == "SELL":
-                        min_vol = self._get_min_volume(best_pair)
-                        if self.holdings.get(best_pair, 0) >= min_vol:
-                            if self._can_sell_profit_target(best_pair, price):
-                                self.execute_sell_order(best_pair, price)
-                            else:
-                                pp = self._profit_percent_from_entry(best_pair, price)
-                                req = self._required_take_profit_percent(best_pair)
-                                pp_str = f"{pp:.2f}" if pp is not None else 'n/a'
+                            self.execute_sell_order(risk_pair, price)
+
+                    self._refresh_cashflows_from_ledger()
+                    adjusted_pnl = self._adjusted_pnl_eur(current_balance)
+                    # update peak balance and compute portfolio drawdown
+                    try:
+                        self.peak_balance = max(getattr(self, 'peak_balance', current_balance), current_balance)
+                        current_dd_pct = 0.0
+                        if self.peak_balance > 0:
+                            current_dd_pct = ((self.peak_balance - current_balance) / self.peak_balance) * 100.0
+                            # enforce portfolio max drawdown circuit breaker
+                            max_dd_cfg = float(self.config.get('risk_management', {}).get('max_drawdown_percent', 10.0))
+                            if current_dd_pct >= max_dd_cfg:
+                                pause_sec = int(self.pause_after_loss_streak_minutes * 60)
+                                self.trading_paused_until_ts = max(self.trading_paused_until_ts, int(time.time()) + pause_sec)
+                                self.logger.warning(f"Portfolio max-drawdown hit: {current_dd_pct:.2f}% >= {max_dd_cfg}%. Pausing buys for {self.pause_after_loss_streak_minutes} minutes.")
+                    except Exception as e:
+                        self.logger.debug(f"Drawdown calculation failed: {e}")
+                        current_dd_pct = 0.0
+
+                    regime_state = "RISK_ON" if self._is_risk_on_regime() else "RISK_OFF"
+                    pause_state = "PAUSED" if self._is_temporarily_paused() else "ACTIVE"
+
+                    label_map = {
+                        "XBTEUR": "BTC", "XXBTZEUR": "BTC",
+                        "ETHEUR": "ETH", "XETHZEUR": "ETH",
+                        "SOLEUR": "SOL",
+                        "ADAEUR": "ADA",
+                        "DOTEUR": "DOT",
+                        "XRPEUR": "XRP", "XXRPZEUR": "XRP",
+                        "LINKEUR": "LINK",
+                    }
+                    pair_status = " ".join([
+                        f"{label_map.get(p, p[:4])}:{self.pair_signals.get(p, '?')}" for p in self.trade_pairs
+                    ])
+                    status_msg = (
+                        f"[{iteration}] {pair_status} | {regime_state}/{pause_state} | Best: {best_pair or 'NONE'} ({best_signal}) "
+                        f"| Bal: {current_balance:.2f}EUR | Start: {self.initial_balance_eur:.2f}EUR "
+                        f"| NetCF: +{self.net_deposits_eur:.2f}/-{self.net_withdrawals_eur:.2f}EUR "
+                        f"| AdjPnL: {adjusted_pnl:+.2f}EUR | TotalPnL: {self.cumulative_pnl_eur(current_balance):+.2f}EUR | Trades: {self.trade_count}"
+                    )
+                    self.logger.info(status_msg)
+                    print(f"\r{status_msg}", end="", flush=True)
+
+                    if iteration % 10 == 0:
+                        metric_parts = []
+                        for p in self.trade_pairs:
+                            m = self.trade_metrics.get(p, {})
+                            closed = int(m.get("closed", 0))
+                            if closed <= 0:
+                                continue
+                            winrate = (m.get("wins", 0) / closed) * 100.0
+                            avg_pnl = m.get("sum_pnl", 0.0) / closed
+                            metric_parts.append(f"{p}: WR {winrate:.0f}% avg {avg_pnl:.2f}EUR")
+                        if metric_parts:
+                            self.logger.info("METRICS | " + " | ".join(metric_parts))
+
+                    # ── Bear Shield: check 4h trend and park in FIAT if confirmed downtrend ──
+                    if self.enable_bear_shield:
+                        bear_now = self._is_bear_market()
+                        if bear_now and not self._bear_mode_active:
+                            self.logger.warning(
+                                f"BEAR SHIELD ACTIVATED: {self.bear_benchmark_pair} below EMA{self.bear_ema_period} "
+                                f"on 4h for {self.bear_confirm_candles} candles — selling all positions, parking in EUR"
+                            )
+                            self._bear_mode_active = True
+                            self._bear_shield_exit_all()
+                        elif not bear_now and self._bear_mode_active:
+                            self.logger.info("BEAR SHIELD DEACTIVATED: trend turned bullish — resuming normal trading")
+                            self._bear_mode_active = False
+                        elif bear_now:
+                            now_ts = time.time()
+                            if (now_ts - self._bear_last_log_ts) >= self.bear_log_interval_minutes * 60:
                                 self.logger.info(
-                                    f"SELL skipped for {best_pair}: profit target not reached ({pp_str}% < {req:.2f}%)"
+                                    f"BEAR SHIELD: still in bear mode ({self.bear_benchmark_pair} < EMA{self.bear_ema_period} on 4h)"
                                 )
-                        elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) <= 0:
-                            # Open short mostly in risk-off environments or very strong negative score
+                                self._bear_last_log_ts = now_ts
+
+                    if best_pair and best_signal != "HOLD" and not self._is_on_cooldown(best_pair) and not self._is_global_cooldown():
+                        price = self.pair_prices.get(best_pair, 0)
+                        if best_signal == "BUY":
                             score = float(self.pair_scores.get(best_pair, 0.0))
-                            if (not self._is_risk_on_regime()) or score <= -self.min_buy_score:
-                                self.execute_open_short_order(best_pair, price)
+                            if self._is_temporarily_paused():
+                                self.logger.warning("BUY paused: loss-streak cooling period active")
+                                self.kelly_fraction = self._calculate_kelly_fraction()
+                            elif self._daily_drawdown_hit():
+                                self.logger.warning("BUY paused: daily loss limit reached")
+                                self.kelly_fraction = self._calculate_kelly_fraction()
+                            elif self._bear_mode_active:
+                                self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
+                            elif self.enable_regime_filter and not self._is_risk_on_regime():
+                                self.logger.info("BUY skipped: regime filter is RISK_OFF")
+                            elif score < self.min_buy_score:
+                                self.logger.info(f"BUY skipped for {best_pair}: weak score {score:.2f} < min {self.min_buy_score:.2f}")
+                            elif self.sentiment_active:
+                                self.logger.info(f"BUY skipped for {best_pair}: sentiment guard active")
+                            elif self._count_open_positions() >= self.max_open_positions:
+                                self.logger.info("BUY skipped: max open positions reached")
+                            elif not self._is_mtf_trend_bullish(best_pair):
+                                self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
+                            elif not self._is_trading_hours():
+                                self.logger.info(
+                                    f"BUY skipped: outside trading hours "
+                                    f"({self.trading_hours_start_utc}:00-{self.trading_hours_end_utc}:00 UTC)"
+                                )
+                            elif not self._has_sufficient_volume(best_pair):
+                                pass  # already logged inside _has_sufficient_volume
                             else:
-                                self.logger.info("SHORT skipped: regime not risk-off and sell score not strong enough")
-                        elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) > 0:
-                            # If already short, consider close on reversal buy impulse
-                            score = float(self.pair_scores.get(best_pair, 0.0))
-                            if score >= self.min_buy_score:
-                                self.execute_close_short_order(best_pair, price)
-                        else:
-                            self._log_empty_sell_signal_throttled(best_pair)
+                                self.execute_buy_order(best_pair, price)
+                        elif best_signal == "SELL":
+                            min_vol = self._get_min_volume(best_pair)
+                            if self.holdings.get(best_pair, 0) >= min_vol:
+                                if self._can_sell_profit_target(best_pair, price):
+                                    self.execute_sell_order(best_pair, price)
+                                else:
+                                    pp = self._profit_percent_from_entry(best_pair, price)
+                                    req = self._required_take_profit_percent(best_pair)
+                                    pp_str = f"{pp:.2f}" if pp is not None else 'n/a'
+                                    self.logger.info(
+                                        f"SELL skipped for {best_pair}: profit target not reached ({pp_str}% < {req:.2f}%)"
+                                    )
+                            elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) <= 0:
+                                # Open short mostly in risk-off environments or very strong negative score
+                                score = float(self.pair_scores.get(best_pair, 0.0))
+                                if (not self._is_risk_on_regime()) or score <= -self.min_buy_score:
+                                    self.execute_open_short_order(best_pair, price)
+                                else:
+                                    self.logger.info("SHORT skipped: regime not risk-off and sell score not strong enough")
+                            elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) > 0:
+                                # If already short, consider close on reversal buy impulse
+                                score = float(self.pair_scores.get(best_pair, 0.0))
+                                if score >= self.min_buy_score:
+                                    self.execute_close_short_order(best_pair, price)
+                            else:
+                                self._log_empty_sell_signal_throttled(best_pair)
 
-                time_since_reload = (datetime.now() - self.last_config_reload).total_seconds()
-                if time_since_reload >= self.config_reload_interval:
-                    self.reload_config()
+                    time_since_reload = (datetime.now() - self.last_config_reload).total_seconds()
+                    if time_since_reload >= self.config_reload_interval:
+                        self.reload_config()
 
-                time.sleep(60)
+                except Exception as e:
+                    self.logger.error(
+                        f"Unhandled error in trading loop (iteration {iteration}): {e}",
+                        exc_info=True,
+                    )
+
+                _sd_notify_watchdog()
+                time.sleep(self.loop_interval_sec)
 
         except KeyboardInterrupt:
             final_balance = self.get_eur_balance()

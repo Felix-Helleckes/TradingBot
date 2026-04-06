@@ -2,6 +2,9 @@
 Description=Kraken Trading Bot
 After=network-online.target
 Wants=network-online.target
+# Stop restarting after 5 failures within 5 minutes (prevents CPU-thrashing on persistent bugs)
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -23,6 +26,8 @@ StandardOutput=journal
 StandardError=journal
 # Weekly restart to clear any accumulated memory fragmentation
 RuntimeMaxSec=604800
+# Watchdog: systemd kills + restarts the bot if it stops sending pings within 120s
+WatchdogSec=120
 
 [Install]
 WantedBy=multi-user.target

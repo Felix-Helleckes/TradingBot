@@ -9,6 +9,8 @@ secret = ""
 [bot_settings]
 base_currency = "EUR"
 auto_select_pair = true
+# Main-loop sleep interval in seconds (hot-reloadable)
+loop_interval_seconds = 60
 
 # Kraken-normalized EUR pairs (altname format preferred)
 trade_pairs = [
@@ -35,7 +37,7 @@ stop_loss_percent = 2.0
 # dynamic sizing uses this % of available EUR, capped by trade_amount_eur
 allocation_per_trade_percent = 20.0
 # Entry quality filter: lowered to match backtest reversion_bias score_gate=8
-min_buy_score = 15.0
+min_buy_score = 10.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -90,7 +92,7 @@ target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 6.5
+take_profit_percent = 3.0
 adaptive_take_profit = true
 max_take_profit_percent = 9.0
 # Small buffer to cover fees (percent added to required TP)
@@ -120,8 +122,8 @@ pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = 
 max_open_positions = 2
 # Cooldowns tuned to reversion_bias: 60min per-pair, 90min global
 # Fewer trades = lower fee drag, matches 43 trades/year vs 154 for main_baseline
-trade_cooldown_seconds = 3600
-global_trade_cooldown_seconds = 5400
+trade_cooldown_seconds = 1800
+global_trade_cooldown_seconds = 2700
 # Suppress repeated empty SELL logs per pair (seconds)
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0
@@ -193,7 +195,8 @@ short_stop_loss_percent = 3.0
 log_level = "INFO"
 log_to_file = true
 log_file_path = "logs/bot_activity.log"
-fresh_log_on_start = true
+# Logs rotate at 5 MB (5 backups kept). fresh_log_on_start is no longer used.
+fresh_log_on_start = false
 
 [backtesting]
 historical_data_path = "data/historical_prices.csv"
