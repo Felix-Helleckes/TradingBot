@@ -1670,16 +1670,33 @@ class TradingBot:
                         if str(risk_type).startswith("SHORT_"):
                             self.execute_close_short_order(risk_pair, price)
                         else:
-                            self.execute_sell_order(risk_pair, price)
+                            # Emergency exits (stops, time, break-even) bypass the TP gate
+                            # Only TAKE_PROFIT type requires the profit gate
+                            _stop_types = {"ATR", "ATR_TRAIL", "HARD_STOP", "BREAK_EVEN",
+                                           "TIME_STOP", "TRAILING_STOP"}
+                            _require_tp = risk_type not in _stop_types
+                            self.execute_sell_order(risk_pair, price,
+                                                    require_profit_target=_require_tp,
+                                                    reason=risk_type)
 
                     self._refresh_cashflows_from_ledger()
                     adjusted_pnl = self._adjusted_pnl_eur(current_balance)
+                    # Portfolio value = EUR cash + value of all open crypto positions
+                    # Using cash-only caused false drawdown triggers after every buy order
+                    try:
+                        holdings_value = sum(
+                            self.holdings.get(p, 0.0) * self.pair_prices.get(p, 0.0)
+                            for p in self.trade_pairs
+                        )
+                        portfolio_value = current_balance + holdings_value
+                    except Exception:
+                        portfolio_value = current_balance
                     # update peak balance and compute portfolio drawdown
                     try:
-                        self.peak_balance = max(getattr(self, 'peak_balance', current_balance), current_balance)
+                        self.peak_balance = max(getattr(self, 'peak_balance', portfolio_value), portfolio_value)
                         current_dd_pct = 0.0
                         if self.peak_balance > 0:
-                            current_dd_pct = ((self.peak_balance - current_balance) / self.peak_balance) * 100.0
+                            current_dd_pct = ((self.peak_balance - portfolio_value) / self.peak_balance) * 100.0
                             # enforce portfolio max drawdown circuit breaker
                             max_dd_cfg = float(self.config.get('risk_management', {}).get('max_drawdown_percent', 10.0))
                             if current_dd_pct >= max_dd_cfg:
