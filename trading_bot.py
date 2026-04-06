@@ -1500,7 +1500,17 @@ class TradingBot:
         return None, None, None
 
     def _warmup_pair_history(self, pair):
-        """Seed price history from 60m OHLC candles when history is too sparse."""
+        """Seed price history — first tries NAS 5m OHLC, then falls back to Kraken API 60m."""
+        # Prefer NAS 5m (more granular, no API call)
+        if self.nas_root:
+            try:
+                self.analysis_tool.seed_from_nas_ohlc(pair, self.nas_root)
+                history = self.analysis_tool._get_price_history(pair)
+                if len(history) >= self.analysis_tool.sma_long:
+                    return
+            except Exception as e:
+                self.logger.warning(f"NAS warmup failed for {pair}: {e}")
+        # Fallback: Kraken API 60m OHLC
         try:
             ohlc = self.api_client.get_ohlc_data(pair, interval=60)
             if not ohlc:
@@ -1541,8 +1551,8 @@ class TradingBot:
                 current_price = float(market_data[pair_key]['c'][0])
                 self.pair_prices[pair] = current_price
 
-                # Seed history from 15m OHLC candles if not yet warmed up
-                if len(self.analysis_tool._get_price_history(pair_key)) < self.analysis_tool.sma_long:
+                # Seed history from NAS/API OHLC if buffer isn't full yet
+                if len(self.analysis_tool._get_price_history(pair_key)) < self.analysis_tool.max_history:
                     self._warmup_pair_history(pair)
                 
                 # Update airbag history and check for crash

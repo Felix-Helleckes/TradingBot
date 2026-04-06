@@ -38,13 +38,13 @@ stop_loss_percent = 2.0
 allocation_per_trade_percent = 20.0
 # Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
 # reduce fee drag on small account
-min_buy_score = 15.0
+min_buy_score = 12.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
 # Trend/breakout: buy Bollinger Band upward breakout
 enable_mean_reversion_signals = true
-enable_trend_breakout_signals = false
+enable_trend_breakout_signals = true
 mr_rsi_oversold_threshold = 28
 mr_rsi_overbought_threshold = 62
 
@@ -53,7 +53,7 @@ enable_regime_filter = true
 regime_benchmark_pair = "XBTEUR"
 regime_min_score = -10.0
 enable_mtf_regime_scoring = true
-mtf_regime_min_score = -2.0
+mtf_regime_min_score = -5.0
 # Do not auto-sell at a loss: disable hard stop loss
 enable_hard_stop_loss = true
 hard_stop_loss_percent = 2.5
@@ -72,7 +72,7 @@ enable_sentiment_guard = false
 # Time-of-day filter: only open new positions during high-volume hours (UTC)
 # 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
 # Enabled: avoids low-volume Asian sessions where spreads are wider
-enable_trading_hours = true
+enable_trading_hours = false
 trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 
@@ -94,7 +94,7 @@ target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 3.0
+take_profit_percent = 4.5
 adaptive_take_profit = true
 max_take_profit_percent = 9.0
 # Small buffer to cover fees (percent added to required TP)
@@ -124,8 +124,8 @@ pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = 
 max_open_positions = 2
 # Cooldowns tuned to reversion_bias: 2h per-pair, 90min global
 # Fewer trades = lower fee drag on small EUR account
-trade_cooldown_seconds = 7200
-global_trade_cooldown_seconds = 3600
+trade_cooldown_seconds = 3600
+global_trade_cooldown_seconds = 1800
 # Suppress repeated empty SELL logs per pair (seconds)
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0

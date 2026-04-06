@@ -56,7 +56,7 @@ class TechnicalAnalysis:
         self.min_volatility_pct = min_volatility_pct
         self.logger = logging.getLogger(__name__)
         self.pair_price_history = {}
-        self.max_history = 65  # enough for SMA50 + RSI14 + buffer
+        self.max_history = 200  # 200 ticks → SMA50 uses 50/200; better context than 65
         self.buffer_path = os.path.join(os.path.dirname(__file__), 'data', 'history_buffer.json')
         # Signal engine mode flags (pushed from TradingBot after config load)
         self.enable_mr_signals = True    # mean-reversion: RSI oversold/overbought
@@ -102,7 +102,62 @@ class TechnicalAnalysis:
         except Exception as e:
             self.logger.error(f"Error saving price history buffer: {e}")
 
-    def seed_from_ohlc(self, pair, closes):
+    def seed_from_nas_ohlc(self, pair, nas_root):
+        """Seed price history from NAS 5-minute OHLC CSV files.
+
+        CSV format: ts,open,high,low,close,vwap,volume,count
+        NAS folder mapping: XBTEUR→XXBTZEUR, ETHEUR→XETHZEUR, XRPEUR→XXRPZEUR,
+        SOLEUR→SOLEUR (same).
+        Only seeds if history is still too sparse (< sma_long).
+        """
+        import csv
+        from pathlib import Path
+
+        folder_map = {
+            'XBTEUR': 'XXBTZEUR',
+            'ETHEUR': 'XETHZEUR',
+            'XRPEUR': 'XXRPZEUR',
+            'SOLEUR': 'SOLEUR',
+            'ADAEUR': 'ADAEUR',
+            'DOTEUR': 'DOTEUR',
+            'LINKEUR': 'LINKEUR',
+        }
+        history = self._get_price_history(pair)
+        if len(history) >= self.max_history:
+            return  # buffer already full
+
+        folder = folder_map.get(pair, pair)
+        import datetime
+        year = datetime.datetime.utcnow().year
+        csv_path = Path(nas_root) / str(year) / folder / 'ohlc_5m.csv'
+        if not csv_path.exists():
+            return
+        try:
+            closes = []
+            with open(csv_path, newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        closes.append(float(row['close']))
+                    except (KeyError, ValueError):
+                        continue
+            if not closes:
+                return
+            # Prepend NAS data (older) before current live history
+            needed = self.max_history - len(history)
+            nas_closes = closes[-needed:] if needed < len(closes) else closes
+            existing = list(history)
+            history.clear()
+            for c in nas_closes:
+                history.append(c)
+            for c in existing:
+                history.append(c)
+            self._save_history()
+            self.logger.info(f"[NAS seed] {pair}: prepended {len(nas_closes)} closes → buffer={len(history)}/{self.max_history}")
+        except Exception as e:
+            self.logger.warning(f"[NAS seed] {pair}: failed to seed from {csv_path}: {e}")
+
+
         """Pre-populate price history from OHLC candle closes.
         Only seeds if the current history is too sparse for reliable signals.
         """
@@ -201,10 +256,12 @@ class TechnicalAnalysis:
             # Buy extreme RSI oversold when not in strong downtrend; sell RSI overbought
             if self.enable_mr_signals and rsi_full is not None:
                 rsi_s = 0.0
-                if rsi_full < 30:
-                    rsi_s = (30 - rsi_full) / 30 * 50
-                elif rsi_full > 70:
-                    rsi_s = -((rsi_full - 70) / 30 * 50)
+                buy_t = getattr(self, 'mr_rsi_buy', 33)
+                sell_t = getattr(self, 'mr_rsi_sell', 67)
+                if rsi_full <= buy_t:
+                    rsi_s = (buy_t - rsi_full) / max(buy_t, 1) * 50
+                elif rsi_full >= sell_t:
+                    rsi_s = -((rsi_full - sell_t) / max(100 - sell_t, 1) * 50)
                 sma_s = max(-50.0, min(50.0, sma_ratio * 100 * 10))
                 mr_score = rsi_s + sma_s
                 if rsi_full <= self.mr_rsi_buy and sma_ratio > -0.01:
