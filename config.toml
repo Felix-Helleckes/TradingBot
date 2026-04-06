@@ -94,7 +94,7 @@ target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 4.5
+take_profit_percent = 3.5
 adaptive_take_profit = true
 max_take_profit_percent = 9.0
 # Small buffer to cover fees (percent added to required TP)
