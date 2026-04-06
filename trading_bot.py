@@ -149,6 +149,7 @@ class TradingBot:
         self.last_global_trade_at = 0
         self._normalized_pair_logs_seen = set()
         self._last_empty_sell_log_at = {}
+        self._load_cooldown_state()
 
         self.trade_count = 0
         self.consecutive_losses = 0
@@ -1188,6 +1189,40 @@ class TradingBot:
         """Return path to the persistent P&L state file."""
         return Path(__file__).parent / "data" / "pnl_state.json"
 
+    def _cooldown_state_path(self) -> Path:
+        return Path(__file__).parent / "data" / "cooldown_state.json"
+
+    def _save_cooldown_state(self) -> None:
+        """Persist last_trade_at and last_global_trade_at so cooldowns survive restarts."""
+        try:
+            state = {
+                "last_global_trade_at": self.last_global_trade_at,
+                "last_trade_at": self.last_trade_at,
+            }
+            path = self._cooldown_state_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(state))
+        except Exception as exc:
+            self.logger.warning(f"Could not save cooldown state: {exc}")
+
+    def _load_cooldown_state(self) -> None:
+        """Restore cooldown timestamps from the last run so we don't retrade immediately."""
+        path = self._cooldown_state_path()
+        try:
+            if not path.exists():
+                return
+            state = json.loads(path.read_text())
+            self.last_global_trade_at = float(state.get("last_global_trade_at", 0))
+            saved_pair_times = state.get("last_trade_at", {})
+            for pair, ts in saved_pair_times.items():
+                self.last_trade_at[pair] = float(ts)
+            self.logger.info(
+                f"Restored cooldown state: global_last={self.last_global_trade_at:.0f}, "
+                f"pairs={list(saved_pair_times.keys())}"
+            )
+        except Exception as exc:
+            self.logger.warning(f"Could not load cooldown state: {exc}")
+
     def _load_cumulative_pnl_state(self, current_balance: float) -> None:
         """Load or initialise the persistent P&L baseline.
 
@@ -1222,18 +1257,10 @@ class TradingBot:
         """Return total P&L since the bot was first ever started."""
         return current_balance - getattr(self, "cumulative_start_eur", current_balance)
 
-
-        """Return the number of pairs with an active long position above minimum volume."""
-        count = 0
-        for pair in self.trade_pairs:
-            if self.holdings.get(pair, 0) >= self._get_min_volume(pair):
-                count += 1
-        return count
-
     def _count_open_positions(self) -> int:
         """Return the number of pairs where holdings exceed the minimum tradeable volume."""
         return sum(
-            1 for pair in self.pairs
+            1 for pair in self.trade_pairs
             if self.holdings.get(pair, 0.0) >= self._get_min_volume(pair)
         )
 
@@ -1588,6 +1615,18 @@ class TradingBot:
         self.logger.debug("Performance baseline is fixed at startup; deposits/withdrawals are tracked separately")
         self.logger.info(f"Take-Profit: {self.take_profit_percent}% | Stop-Loss: {self.stop_loss_percent}%")
 
+        # Log holdings and purchase prices for each pair so restarts are transparent
+        for pair in self.trade_pairs:
+            qty = self.holdings.get(pair, 0.0)
+            avg = self.purchase_prices.get(pair, 0.0)
+            min_v = self._get_min_volume(pair)
+            if qty >= min_v:
+                self.logger.info(
+                    f"Startup position: {pair} qty={qty:.8f} avg_entry={avg:.4f} EUR"
+                )
+            else:
+                self.logger.info(f"Startup position: {pair} — no holdings (qty={qty:.8f})")
+
         try:
             iteration = 0
             while True:
@@ -1842,6 +1881,7 @@ class TradingBot:
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
                 self.last_global_trade_at = now_ts
+                self._save_cooldown_state()
                 self.peak_prices[pair] = max(self.peak_prices.get(pair, 0.0), price)
                 if self.entry_timestamps.get(pair) is None:
                     self.entry_timestamps[pair] = int(time.time())
@@ -1904,6 +1944,7 @@ class TradingBot:
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
                 self.last_global_trade_at = now_ts
+                self._save_cooldown_state()
                 # clear position state
                 self.purchase_prices[pair] = 0.0
                 self.peak_prices[pair] = 0.0
@@ -1961,6 +2002,7 @@ class TradingBot:
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
                 self.last_global_trade_at = now_ts
+                self._save_cooldown_state()
                 self.short_qty[pair] = volume
                 self.short_entry_prices[pair] = price
                 self.entry_timestamps[pair] = int(now_ts)
@@ -2005,6 +2047,7 @@ class TradingBot:
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
                 self.last_global_trade_at = now_ts
+                self._save_cooldown_state()
                 self.short_qty[pair] = 0.0
                 self.short_entry_prices[pair] = 0.0
                 self.entry_timestamps[pair] = None
