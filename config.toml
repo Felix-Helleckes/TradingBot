@@ -36,8 +36,9 @@ max_drawdown_percent = 10.0
 stop_loss_percent = 2.0
 # dynamic sizing uses this % of available EUR, capped by trade_amount_eur
 allocation_per_trade_percent = 20.0
-# Entry quality filter: lowered to match backtest reversion_bias score_gate=8
-min_buy_score = 10.0
+# Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
+# reduce fee drag on small account
+min_buy_score = 15.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -70,7 +71,8 @@ enable_sentiment_guard = false
 
 # Time-of-day filter: only open new positions during high-volume hours (UTC)
 # 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
-enable_trading_hours = false
+# Enabled: avoids low-volume Asian sessions where spreads are wider
+enable_trading_hours = true
 trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 
@@ -120,10 +122,10 @@ pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = 
 
 # Execution/risk guards
 max_open_positions = 2
-# Cooldowns tuned to reversion_bias: 60min per-pair, 90min global
-# Fewer trades = lower fee drag, matches 43 trades/year vs 154 for main_baseline
-trade_cooldown_seconds = 1800
-global_trade_cooldown_seconds = 2700
+# Cooldowns tuned to reversion_bias: 2h per-pair, 90min global
+# Fewer trades = lower fee drag on small EUR account
+trade_cooldown_seconds = 7200
+global_trade_cooldown_seconds = 3600
 # Suppress repeated empty SELL logs per pair (seconds)
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0
@@ -182,7 +184,7 @@ bear_benchmark_pair = "XBTEUR"
 bear_log_interval_minutes = 60
 
 [shorting]
-enabled = true
+enabled = false
 leverage = "2"
 max_short_notional_eur = 75.0
 # Separate (lower) take-profit for shorts — quick moves in downtrends

@@ -251,8 +251,14 @@ class KrakenAPI:
                     )
                     volume = closable_volume
 
+            # Spot SELL orders reduce long exposure — caps only apply to opening positions.
+            # Short-side cap is irrelevant for closing a spot long; skip caps entirely.
+            is_spot_sell = direction == 'sell' and (leverage is None or float(leverage) <= 1.0)
+            if is_spot_sell:
+                # Fall straight through to order placement; no cap check needed.
+                pass
             # If caps enabled, evaluate current exposure (only for opening/increasing orders)
-            if enable_caps and not reduce_only:
+            elif enable_caps and not reduce_only:
                 exposure_long = 0.0
                 exposure_short = 0.0
                 count_long = 0
@@ -310,8 +316,25 @@ class KrakenAPI:
                 lev = float(leverage) if leverage else 1.0
                 allowed_by_margin = max(0.0, (mf - min_buffer) * lev)
 
-                # final allowed notional
-                final_allowed = min(allowed_by_side, allowed_by_margin)
+                # Spot SELL orders reduce exposure — skip the margin cap entirely.
+                # (Margin cap only makes sense for opening leveraged positions.)
+                # NOTE: is_spot_sell check now handled above (pre-caps bypass).
+
+                self.logger.debug(
+                    f"Preflight caps: dir={direction} lev={leverage} "
+                    f"equity={equity:.2f} mf={mf:.2f} allowed_side={allowed_by_side:.2f} "
+                    f"allowed_margin={allowed_by_margin:.2f} tb_empty={not tb}"
+                )
+
+                if not tb:
+                    # TradeBalance returned no data (API error or spot account quirk).
+                    # Fail-open: allow up to the configured side cap so buys can proceed.
+                    self.logger.warning(
+                        "TradeBalance returned no data; skipping margin cap — using side cap only"
+                    )
+                    final_allowed = allowed_by_side
+                else:
+                    final_allowed = min(allowed_by_side, allowed_by_margin)
                 self.logger.debug(
                     f"Preflight: equity={equity:.2f} mf={mf:.2f} side_exp={side_exposure:.2f} "
                     f"allowed_side={allowed_by_side:.2f} allowed_margin={allowed_by_margin:.2f} final={final_allowed:.2f}"
