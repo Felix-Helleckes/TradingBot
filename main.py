@@ -8,6 +8,10 @@ import atexit
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Load .env BEFORE importing any module that reads env vars at module level
+load_dotenv()
+
 from kraken_interface import KrakenAPI
 from trading_bot import TradingBot, Backtester
 from utils import load_config, validate_config
@@ -16,8 +20,6 @@ try:
     import fcntl
 except Exception:  # pragma: no cover
     fcntl = None
-
-load_dotenv()
 CONFIG_PATH = "config.toml"
 LOCK_FILE = "/tmp/kraken_bot.lock"
 _lock_fp = None

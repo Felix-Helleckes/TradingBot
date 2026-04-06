@@ -925,6 +925,7 @@ class TradingBot:
             # Reconcile with live holdings from balance (source of truth for quantity)
             for pair in watched:
                 live_qty = self.holdings.get(pair, 0.0)
+                history_qty = self.position_qty.get(pair, 0.0)
                 self.position_qty[pair] = live_qty
                 min_vol = self._get_min_volume(pair)
                 # Use a small grace margin (5%) so a position at exactly min_volume
@@ -942,6 +943,26 @@ class TradingBot:
                     if self.entry_timestamps.get(pair) is None:
                         self.entry_timestamps[pair] = int(time.time())
                 else:
+                    # Detect phantom historical positions: if history qty >> live qty by >10%,
+                    # the VWAP is contaminated by old sessions. Fall back to most recent buy.
+                    if history_qty > live_qty * 1.10 and live_qty >= min_vol * 0.95:
+                        # Find most recent BUY for this pair in history
+                        recent_buy = next(
+                            (t for t in reversed(sorted_trades)
+                             if pair_aliases.get(t.get('pair', ''), t.get('pair', '')) == pair
+                             and t.get('type', '').lower() == 'buy'),
+                            None
+                        )
+                        if recent_buy:
+                            rc = float(recent_buy.get('cost', 0))
+                            rv = float(recent_buy.get('vol', 1)) or 1.0
+                            rf = float(recent_buy.get('fee', 0))
+                            corrected = (rc + rf) / rv
+                            self.logger.warning(
+                                f"purchase_prices[{pair}]: history qty {history_qty:.4f} >> live {live_qty:.4f} "
+                                f"(phantom positions detected). Using last buy price {corrected:.5f} instead of {self.purchase_prices[pair]:.5f}."
+                            )
+                            self.purchase_prices[pair] = corrected
                     if self.entry_timestamps.get(pair) is None:
                         self.entry_timestamps[pair] = int(time.time())
 
