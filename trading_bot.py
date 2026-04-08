@@ -776,6 +776,105 @@ class TradingBot:
         self.get_crypto_holdings()
         self.load_purchase_prices_from_history(force=force_history)
 
+    def _place_live_order(self, pair, direction, volume, price=None, leverage=None, post_only=False, reduce_only=False):
+        """Place a live order using the configured execution path.
+
+        If limit fallback is enabled, wait for the order to fill (or be
+        cancelled + replaced with market on timeout) before returning. This
+        prevents the bot from treating a merely accepted post-only order as an
+        executed trade, which otherwise can cause duplicate SELLs / phantom
+        drawdown when funds are temporarily reserved.
+        """
+        exec_cfg = self.config.get('execution', {}) if isinstance(self.config, dict) else {}
+        use_fallback = bool(exec_cfg.get('enable_live_limit_fallback', True))
+        timeout_sec = int(exec_cfg.get('limit_fallback_timeout_sec', 30))
+
+        if use_fallback:
+            return self.api_client.place_order_with_fallback(
+                pair=pair,
+                direction=direction,
+                volume=volume,
+                price=price,
+                leverage=leverage,
+                post_only=post_only,
+                reduce_only=reduce_only,
+                timeout_sec=timeout_sec,
+            )
+
+        return self.api_client.place_order(
+            pair=pair,
+            direction=direction,
+            volume=volume,
+            price=price,
+            leverage=leverage,
+            post_only=post_only,
+            reduce_only=reduce_only,
+        )
+
+    def _estimate_open_buy_reserve_eur(self) -> float:
+        """Best-effort estimate of EUR currently reserved in open BUY orders.
+
+        Kraken's free EUR balance can drop as soon as a post-only BUY is placed,
+        even before the trade is filled and before crypto holdings appear.
+        Without adding this reserve back, the bot can misread a normal pending
+        entry as a large portfolio drawdown on a small account.
+        """
+        try:
+            open_orders_result = self.api_client.get_open_orders()
+            if not open_orders_result:
+                return 0.0
+
+            open_map = open_orders_result.get('open', open_orders_result) if isinstance(open_orders_result, dict) else {}
+            if not isinstance(open_map, dict) or not open_map:
+                return 0.0
+
+            pair_aliases = {
+                'XXBTZEUR': 'XBTEUR', 'XBTEUR': 'XBTEUR',
+                'XETHZEUR': 'ETHEUR', 'ETHEUR': 'ETHEUR',
+                'SOLEUR': 'SOLEUR',
+                'ADAEUR': 'ADAEUR',
+                'DOTEUR': 'DOTEUR',
+                'XXRPZEUR': 'XRPEUR', 'XRPEUR': 'XRPEUR',
+                'LINKEUR': 'LINKEUR',
+                'MATICEUR': 'MATICEUR',
+                'POLEUR': 'POLEUR',
+            }
+
+            reserved_eur = 0.0
+            for _, order in open_map.items():
+                descr = order.get('descr', {}) if isinstance(order, dict) else {}
+                side = str(descr.get('type', '') or order.get('type', '') or '').lower()
+                if side != 'buy':
+                    continue
+
+                raw_pair = str(descr.get('pair', '') or order.get('pair', '') or '').upper()
+                norm_pair = pair_aliases.get(raw_pair, raw_pair)
+                if norm_pair not in self.trade_pairs:
+                    continue
+
+                try:
+                    vol = float(order.get('vol', 0) or 0)
+                    vol_exec = float(order.get('vol_exec', 0) or 0)
+                    remaining_vol = max(0.0, vol - vol_exec)
+                except Exception:
+                    remaining_vol = 0.0
+
+                price_raw = descr.get('price', None)
+                if price_raw in (None, '', '0', 0):
+                    price_raw = order.get('price', 0)
+                try:
+                    limit_price = float(price_raw or 0)
+                except Exception:
+                    limit_price = 0.0
+
+                if remaining_vol > 0 and limit_price > 0:
+                    reserved_eur += remaining_vol * limit_price
+
+            return reserved_eur
+        except Exception as e:
+            self.logger.debug(f"Could not estimate reserved BUY EUR from open orders: {e}")
+            return 0.0
+
     def _load_trade_history_from_nas(self, year: int) -> dict:
         """Load persisted trade history from NAS JSON file. Returns {} if unavailable."""
         path = self.nas_root / str(year) / 'trade_history' / f'trades_{year}.json'
@@ -1709,7 +1808,8 @@ class TradingBot:
                             self.holdings.get(p, 0.0) * self.pair_prices.get(p, 0.0)
                             for p in self.trade_pairs
                         )
-                        portfolio_value = current_balance + holdings_value
+                        reserved_buy_eur = self._estimate_open_buy_reserve_eur()
+                        portfolio_value = current_balance + holdings_value + reserved_buy_eur
                     except Exception:
                         portfolio_value = current_balance
                     # update peak balance and compute portfolio drawdown
@@ -1923,7 +2023,7 @@ class TradingBot:
             volume = self._calculate_volume(pair, price, available_eur=planned_eur)
             self.logger.info(f"Placing BUY order (MAKER/POST-ONLY): {volume:.6f} {pair} at {price:.2f} EUR")
 
-            result = self.api_client.place_order(pair=pair, direction='buy', volume=volume, price=price, post_only=True)
+            result = self._place_live_order(pair=pair, direction='buy', volume=volume, price=price, post_only=True)
             if result:
                 self.trade_count += 1
                 now_ts = time.time()
@@ -1986,7 +2086,7 @@ class TradingBot:
             est_profit_eur = (price - avg_entry) * volume if avg_entry > 0 else 0.0
 
             self.logger.info(f"Placing SELL order (MAKER/POST-ONLY): {volume:.6f} {pair} at {price:.2f} EUR")
-            result = self.api_client.place_order(pair=pair, direction='sell', volume=volume, price=price, post_only=True)
+            result = self._place_live_order(pair=pair, direction='sell', volume=volume, price=price, post_only=True)
             if result:
                 self.trade_count += 1
                 now_ts = time.time()
@@ -2044,7 +2144,7 @@ class TradingBot:
             self.logger.info(
                 f"Placing SHORT OPEN order: {volume:.6f} {pair} at ~{price:.2f} EUR (lev={self.short_leverage}x)"
             )
-            result = self.api_client.place_order(pair=pair, direction='sell', volume=volume, leverage=self.short_leverage)
+            result = self._place_live_order(pair=pair, direction='sell', volume=volume, leverage=self.short_leverage)
             if result:
                 self.trade_count += 1
                 now_ts = time.time()
@@ -2083,7 +2183,7 @@ class TradingBot:
             pnl_eur = (entry - price) * qty
             pnl_pct = ((entry - price) / entry) * 100.0
             self.logger.info(f"Placing SHORT CLOSE order: {qty:.6f} {pair} at ~{price:.2f} EUR")
-            result = self.api_client.place_order(
+            result = self._place_live_order(
                 pair=pair,
                 direction='buy',
                 volume=qty,
