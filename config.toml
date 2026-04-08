@@ -35,10 +35,10 @@ target_balance_eur = 150.0
 max_drawdown_percent = 10.0
 stop_loss_percent = 2.0
 # dynamic sizing uses this % of available EUR, capped by trade_amount_eur
-allocation_per_trade_percent = 20.0
+allocation_per_trade_percent = 15.0
 # Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
 # reduce fee drag on small account
-min_buy_score = 12.0
+min_buy_score = 16.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -72,18 +72,18 @@ enable_sentiment_guard = false
 # Time-of-day filter: only open new positions during high-volume hours (UTC)
 # 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
 # Enabled: avoids low-volume Asian sessions where spreads are wider
-enable_trading_hours = false
+enable_trading_hours = true
 trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 
 # Volume filter: skip BUY if current 15m candle volume < ratio × 20-candle average
 # 0.5 = must be at least 50% of normal volume
 enable_volume_filter = true
-volume_filter_min_ratio = 0.3
+volume_filter_min_ratio = 0.5
 
 # Sell logic: require minimum profit and allow higher TP in bull run
 enable_time_stop = true
-time_stop_hours = 16
+time_stop_hours = 12
 # Aggressive autonomy: disable daily drawdown cutoff and favor full allocation
 enable_daily_drawdown = true
 daily_loss_limit_percent = 5.0
@@ -91,10 +91,10 @@ daily_loss_limit_percent = 5.0
 risk_off_allocation_multiplier = 0.50
 enable_volatility_targeting = true
 target_volatility_pct = 1.6
-max_consecutive_losses = 3
-pause_after_loss_streak_minutes = 60
+max_consecutive_losses = 2
+pause_after_loss_streak_minutes = 180
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 3.5
+take_profit_percent = 4.0
 adaptive_take_profit = true
 max_take_profit_percent = 9.0
 # Small buffer to cover fees (percent added to required TP)
@@ -121,11 +121,11 @@ enable_pyramiding = false
 pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = half way to TP)
 
 # Execution/risk guards
-max_open_positions = 2
+max_open_positions = 1
 # Cooldowns tuned to reversion_bias: 2h per-pair, 90min global
 # Fewer trades = lower fee drag on small EUR account
-trade_cooldown_seconds = 3600
-global_trade_cooldown_seconds = 1800
+trade_cooldown_seconds = 7200
+global_trade_cooldown_seconds = 5400
 # Suppress repeated empty SELL logs per pair (seconds)
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0
@@ -134,7 +134,7 @@ min_trade_eur = 10.0
 # Minimum free margin (EUR) to leave available before placing new opens
 min_free_margin_buffer = 5.0
 # Maximum notional exposure (EUR) allowed per side (long/short)
-max_notional_per_side = 40.0
+max_notional_per_side = 25.0
 # Maximum number of open positions allowed per side
 max_open_positions_per_side = 12
 # Enable enforcement of the parallel caps/rules
@@ -144,7 +144,7 @@ min_auto_scale_notional = 0.2
 # Aggressive autoscale mode: prefer to scale down orders instead of blocking
 aggressive_autoscale = true
 # Dynamic notional scaling factor (fraction of equity to allow per side)
-dynamic_notional_fraction = 0.4
+dynamic_notional_fraction = 0.25
 
 # ── Daytrading mode ──────────────────────────────────────────────────────────
 # When enable_daytrading = true, the bot uses intraday parameters:
