@@ -811,22 +811,20 @@ class TradingBot:
             reduce_only=reduce_only,
         )
 
-    def _estimate_open_buy_reserve_eur(self) -> float:
-        """Best-effort estimate of EUR currently reserved in open BUY orders.
+    def _get_open_orders_snapshot(self):
+        """Return normalized open-order metadata keyed by Kraken txid.
 
-        Kraken's free EUR balance can drop as soon as a post-only BUY is placed,
-        even before the trade is filled and before crypto holdings appear.
-        Without adding this reserve back, the bot can misread a normal pending
-        entry as a large portfolio drawdown on a small account.
+        Normalizes pair aliases and computes remaining volume so callers can
+        reason about pending orders without duplicating Kraken response parsing.
         """
         try:
             open_orders_result = self.api_client.get_open_orders()
             if not open_orders_result:
-                return 0.0
+                return {}
 
             open_map = open_orders_result.get('open', open_orders_result) if isinstance(open_orders_result, dict) else {}
             if not isinstance(open_map, dict) or not open_map:
-                return 0.0
+                return {}
 
             pair_aliases = {
                 'XXBTZEUR': 'XBTEUR', 'XBTEUR': 'XBTEUR',
@@ -840,18 +838,12 @@ class TradingBot:
                 'POLEUR': 'POLEUR',
             }
 
-            reserved_eur = 0.0
-            for _, order in open_map.items():
+            normalized = {}
+            for txid, order in open_map.items():
                 descr = order.get('descr', {}) if isinstance(order, dict) else {}
                 side = str(descr.get('type', '') or order.get('type', '') or '').lower()
-                if side != 'buy':
-                    continue
-
                 raw_pair = str(descr.get('pair', '') or order.get('pair', '') or '').upper()
                 norm_pair = pair_aliases.get(raw_pair, raw_pair)
-                if norm_pair not in self.trade_pairs:
-                    continue
-
                 try:
                     vol = float(order.get('vol', 0) or 0)
                     vol_exec = float(order.get('vol_exec', 0) or 0)
@@ -867,9 +859,45 @@ class TradingBot:
                 except Exception:
                     limit_price = 0.0
 
+                normalized[txid] = {
+                    'pair': norm_pair,
+                    'side': side,
+                    'remaining_vol': remaining_vol,
+                    'limit_price': limit_price,
+                    'raw': order,
+                }
+            return normalized
+        except Exception as e:
+            self.logger.debug(f"Could not load open-order snapshot: {e}")
+            return {}
+
+    def _has_open_order(self, pair, side) -> bool:
+        """Return True when there is already a pending order for pair+side."""
+        try:
+            for _, meta in self._get_open_orders_snapshot().items():
+                if meta.get('pair') == pair and meta.get('side') == side and float(meta.get('remaining_vol', 0.0)) > 0:
+                    return True
+            return False
+        except Exception:
+            return False
+
+    def _estimate_open_buy_reserve_eur(self) -> float:
+        """Best-effort estimate of EUR currently reserved in open BUY orders.
+
+        Kraken's free EUR balance can drop as soon as a post-only BUY is placed,
+        even before the trade is filled and before crypto holdings appear.
+        Without adding this reserve back, the bot can misread a normal pending
+        entry as a large portfolio drawdown on a small account.
+        """
+        try:
+            reserved_eur = 0.0
+            for _, meta in self._get_open_orders_snapshot().items():
+                if meta.get('side') != 'buy':
+                    continue
+                remaining_vol = float(meta.get('remaining_vol', 0.0))
+                limit_price = float(meta.get('limit_price', 0.0))
                 if remaining_vol > 0 and limit_price > 0:
                     reserved_eur += remaining_vol * limit_price
-
             return reserved_eur
         except Exception as e:
             self.logger.debug(f"Could not estimate reserved BUY EUR from open orders: {e}")
@@ -2069,8 +2097,13 @@ class TradingBot:
         """
         try:
             volume = self.holdings.get(pair, 0)
-            if volume < self._get_min_volume(pair):
+            min_vol = self._get_min_volume(pair)
+            if volume < min_vol:
                 self.logger.info(f"SELL skipped for {pair}: no holdings")
+                return
+
+            if self._has_open_order(pair, 'sell'):
+                self.logger.info(f"SELL skipped for {pair}: sell order already open")
                 return
 
             if require_profit_target and not self._can_sell_profit_target(pair, price):
@@ -2088,26 +2121,31 @@ class TradingBot:
             self.logger.info(f"Placing SELL order (MAKER/POST-ONLY): {volume:.6f} {pair} at {price:.2f} EUR")
             result = self._place_live_order(pair=pair, direction='sell', volume=volume, price=price, post_only=True)
             if result:
+                self._sync_account_state(force_history=True)
+                remaining_volume = self.holdings.get(pair, 0.0)
+                if remaining_volume >= min_vol * 0.95 or self._has_open_order(pair, 'sell'):
+                    self.logger.warning(
+                        f"SELL order for {pair} was accepted but position still exists "
+                        f"(remaining={remaining_volume:.8f}). Treating as pending/unfilled; skipping journal/state clear."
+                    )
+                    return
+
                 self.trade_count += 1
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
                 self.last_global_trade_at = now_ts
                 self._save_cooldown_state()
-                # clear position state
                 self.purchase_prices[pair] = 0.0
                 self.peak_prices[pair] = 0.0
                 self.entry_timestamps[pair] = None
-                # clear stop info
                 if pair in self.stop_info:
                     del self.stop_info[pair]
-                self._sync_account_state(force_history=True)
                 self.logger.info(f"SELL ORDER SUCCESS: {result}")
                 self.logger.info(f"SELL SUMMARY: {pair} {volume:.6f} (~{volume*price:.2f} EUR)")
                 self.logger.info(
                     f"SELL PNL ESTIMATE {pair}: {est_profit_eur:.2f} EUR ({est_profit_pct if est_profit_pct is not None else 0:.2f}%)"
                 )
                 self._update_trade_metrics(pair, est_profit_eur)
-                # journal sell
                 self._journal_trade('SELL', pair, volume, price, est_profit_eur, reason or 'SELL_EXECUTED')
                 print(f"\n[SELL] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 pnl_sign = "🟢" if est_profit_eur >= 0 else "🔴"
