@@ -38,7 +38,7 @@ stop_loss_percent = 2.0
 allocation_per_trade_percent = 15.0
 # Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
 # reduce fee drag on small account
-min_buy_score = 16.0
+min_buy_score = 11.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -72,7 +72,7 @@ enable_sentiment_guard = false
 # Time-of-day filter: only open new positions during high-volume hours (UTC)
 # 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
 # Enabled: avoids low-volume Asian sessions where spreads are wider
-enable_trading_hours = true
+enable_trading_hours = false
 trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 
