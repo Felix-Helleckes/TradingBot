@@ -38,7 +38,7 @@ stop_loss_percent = 2.0
 allocation_per_trade_percent = 15.0
 # Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
 # reduce fee drag on small account
-min_buy_score = 11.0
+min_buy_score = 8.0
 
 # Signal engine mode (reversion_bias variant showed best risk/return balance)
 # Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
@@ -94,27 +94,27 @@ target_volatility_pct = 1.6
 max_consecutive_losses = 2
 pause_after_loss_streak_minutes = 180
 # Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 4.0
+take_profit_percent = 5.0
 adaptive_take_profit = true
-max_take_profit_percent = 9.0
+max_take_profit_percent = 12.0
 # Small buffer to cover fees (percent added to required TP)
 # Kraken maker=0.16% entry + taker=0.26% exit = 0.42% minimum; use 0.45% for safety
-sell_fee_buffer_percent = 0.45
+sell_fee_buffer_percent = 0.55
 
 # Conservative slippage deduction applied to exit price before TP check (percent)
 # Accounts for thin order books and taker spread on the exit side
-exit_slippage_buffer_pct = 0.30
+exit_slippage_buffer_pct = 0.35
 
 # ATR stop settings (adaptive stop based on recent volatility)
 enable_atr_stop = true
-atr_period = 14
-atr_multiplier = 2.5
-atr_trail_multiplier = 3.0
+atr_period = 20
+atr_multiplier = 3.0
+atr_trail_multiplier = 4.0
 # ATR dynamic take-profit: floor = atr_tp_multiplier × ATR% (prevents exits before capturing the expected move)
 # With atr_tp_multiplier=2.0 and typical 1h ATR ~1.5% for crypto, effective floor ~ 3% (matches base TP)
 # In low-volatility regimes ATR% < 1.5% → floor stays at take_profit_percent; in high-vol ATR 2.5% → floor 5%
 enable_atr_dynamic_tp = true
-atr_tp_multiplier = 1.5
+atr_tp_multiplier = 2.0
 
 # Pyramiding (add-to-winner) - disabled by default
 enable_pyramiding = false

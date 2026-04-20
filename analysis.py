@@ -188,15 +188,18 @@ class TechnicalAnalysis:
         rs = avg_gain / avg_loss
         return 100 - (100 / (1 + rs))
 
-    def calculate_atr(self, pair, period=14):
-        """Calculate Average True Range using price history buffer."""
+    def calculate_atr(self, pair, period=20):
+        """Calculate Average True Range using price history buffer.
+        Sampled to avoid micro-volatility noise from 30s ticks.
+        """
         prices = self._get_price_history(pair)
-        if len(prices) < period + 1:
+        # Sample every 4th tick (approx 2-minute candles)
+        sampled = list(prices)[::4]
+        if len(sampled) < period + 1:
             return None
         
-        # Approximate TR using absolute difference of consecutive closes
-        prices_list = list(prices)
-        tr = [abs(prices_list[i] - prices_list[i-1]) for i in range(1, len(prices_list))]
+        # Approximate TR using absolute difference of consecutive sampled closes
+        tr = [abs(sampled[i] - sampled[i-1]) for i in range(1, len(sampled))]
         return np.mean(tr[-period:])
 
     def check_mtf_trend(self, prices, short_p=20, long_p=50):
