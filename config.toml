@@ -109,7 +109,7 @@ reentry_guard_pairs = ["VER"]
 min_reentry_profit_pct = 5.0
 # Minimum net sell profit (percent, net of fees). When >0, SELLs are blocked
 # until net profit >= this value. Use with caution (may keep losers open).
-min_net_sell_profit_pct = 5.0
+min_net_sell_profit_pct = 3.0
 
 # Conservative slippage deduction applied to exit price before TP check (percent)
 # Accounts for thin order books and taker spread on the exit side
