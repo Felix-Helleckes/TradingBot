@@ -27,9 +27,9 @@ SOLEUR = 0.02
 XXRPZEUR = 5.0
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 20.0
+trade_amount_eur = 10.0
 initial_balance = 100.0
-target_balance_eur = 150.0
+target_balance_eur = 10000.0
 
 [risk_management]
 max_drawdown_percent = 10.0
@@ -100,6 +100,16 @@ max_take_profit_percent = 12.0
 # Small buffer to cover fees (percent added to required TP)
 # Kraken maker=0.16% entry + taker=0.26% exit = 0.42% minimum; use 0.45% for safety
 sell_fee_buffer_percent = 0.55
+# Estimated exchange fees (percent)
+fees_maker_percent = 0.16
+fees_taker_percent = 0.26
+# Re-entry guard: only pairs listed here are blocked from new BUYs until the
+# last closed trade for that pair had at least min_reentry_profit_pct net profit
+reentry_guard_pairs = ["VER"]
+min_reentry_profit_pct = 5.0
+# Minimum net sell profit (percent, net of fees). When >0, SELLs are blocked
+# until net profit >= this value. Use with caution (may keep losers open).
+min_net_sell_profit_pct = 5.0
 
 # Conservative slippage deduction applied to exit price before TP check (percent)
 # Accounts for thin order books and taker spread on the exit side
@@ -121,7 +131,7 @@ enable_pyramiding = false
 pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = half way to TP)
 
 # Execution/risk guards
-max_open_positions = 1
+max_open_positions = 10
 # Cooldowns tuned to reversion_bias: 2h per-pair, 90min global
 # Fewer trades = lower fee drag on small EUR account
 trade_cooldown_seconds = 10800

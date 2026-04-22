@@ -174,6 +174,16 @@ class TradingBot:
         self.adaptive_tp_enabled = bool(self.config.get('risk_management', {}).get('adaptive_take_profit', True))
         self.max_tp_percent = float(self.config.get('risk_management', {}).get('max_take_profit_percent', 14.0))
         self.sell_fee_buffer_percent = float(self.config.get('risk_management', {}).get('sell_fee_buffer_percent', 0.0))
+        # Explicit fee estimates (percent): used for net-profit calculations and guards
+        self.fees_maker_percent = float(self.config.get('risk_management', {}).get('fees_maker_percent', 0.16))
+        self.fees_taker_percent = float(self.config.get('risk_management', {}).get('fees_taker_percent', 0.26))
+        # Re-entry guard: only pairs listed here are subject to blocking new BUYs until
+        # the last closed trade for that pair achieved min_reentry_profit_pct net profit
+        self.reentry_guard_pairs = [p.upper() for p in self.config.get('risk_management', {}).get('reentry_guard_pairs', ['VER'])]
+        self.min_reentry_profit_pct = float(self.config.get('risk_management', {}).get('min_reentry_profit_pct', 5.0))
+        # Minimum net sell profit required (percent, net of fees). If >0, SELLs are blocked
+        # until the net profit target is met. Use with caution.
+        self.min_net_sell_profit_pct = float(self.config.get('risk_management', {}).get('min_net_sell_profit_pct', 0.0))
         self.empty_sell_log_cooldown_sec = int(self.config.get('risk_management', {}).get('empty_sell_log_cooldown_seconds', 1800))
         # ATR stop config
         self.enable_atr_stop = bool(self.config.get('risk_management', {}).get('enable_atr_stop', False))
@@ -1433,6 +1443,55 @@ class TradingBot:
             return None
         return ((current_price - entry) / entry) * 100.0
 
+    def _last_closed_trade_net_profit_pct(self, pair):
+        """Return the net profit percent of the last closed (BUY->SELL) roundtrip for *pair*.
+
+        Algorithm: read structured JSONL trade log (self.json_journal_path), find the
+        most recent SELL for the pair and the preceding BUY for the same pair, then
+        compute gross percent = (sell_price - buy_price)/buy_price*100 and subtract
+        estimated fees (maker+taker) to produce a conservative net percent.
+
+        Returns float percent or None if no matching history found.
+        """
+        try:
+            if not os.path.exists(self.json_journal_path):
+                return None
+            with open(self.json_journal_path, 'r') as jf:
+                lines = jf.read().splitlines()
+            # scan from the end to find last SELL for this pair
+            for i in range(len(lines) - 1, -1, -1):
+                try:
+                    j = json.loads(lines[i])
+                except Exception:
+                    continue
+                if (j.get('pair') or '').upper() != (pair or '').upper():
+                    continue
+                if j.get('type', '').upper() == 'SELL':
+                    sell = j
+                    # find the preceding BUY for the same pair
+                    buy = None
+                    for k in range(i - 1, -1, -1):
+                        try:
+                            b = json.loads(lines[k])
+                        except Exception:
+                            continue
+                        if (b.get('pair') or '').upper() == (pair or '').upper() and b.get('type', '').upper() == 'BUY':
+                            buy = b
+                            break
+                    if not buy:
+                        return None
+                    buy_price = float(buy.get('price', 0.0) or 0.0)
+                    sell_price = float(sell.get('price', 0.0) or 0.0)
+                    if buy_price <= 0:
+                        return None
+                    gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
+                    fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
+                    net_pct = gross_pct - fees_total
+                    return net_pct
+            return None
+        except Exception:
+            return None
+
     def _compute_atr(self, pair, period=None):
         """Compute approximate ATR from stored price history (fallback to close diffs).
         Returns ATR in price units (EUR).
@@ -1484,14 +1543,8 @@ class TradingBot:
     def _can_sell_profit_target(self, pair, current_price):
         """Only allow sell when current price is at/above configured take-profit threshold from entry.
 
-        Applies a conservative 0.3% slippage buffer: we assume the actual fill
-        will be slightly worse than the current mid-price (thin order books,
-        taker fees on exit). This ensures the TP check is not fooled by a single
-        tick that will never actually fill at that exact price.
-
-        When enable_atr_dynamic_tp is active, the ATR-based TP floor is enforced
-        even when the ATR trailing stop is running (prevents indicator exits before
-        capturing the minimum expected move).
+        Applies a conservative slippage buffer and ensures required TP + optional
+        minimum net profit (net of fees) is met before allowing a SELL.
         """
         # With ATR trailing stop but WITHOUT dynamic TP: no indicator profit gate needed
         if self.enable_atr_stop and not self.enable_atr_dynamic_tp:
@@ -1502,7 +1555,17 @@ class TradingBot:
         profit_pct = self._profit_percent_from_entry(pair, conservative_exit_price)
         if profit_pct is None:
             return False
-        return profit_pct >= self._required_take_profit_percent(pair)
+        # require gross profit >= adaptive required TP
+        required_tp = self._required_take_profit_percent(pair)
+        if profit_pct < required_tp:
+            return False
+        # enforce minimum NET profit (after estimated fees) if configured
+        min_net = float(self.config.get('risk_management', {}).get('min_net_sell_profit_pct', self.min_net_sell_profit_pct))
+        if min_net > 0:
+            fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
+            net_profit_pct = profit_pct - fees_total
+            return net_profit_pct >= min_net
+        return True
 
     def _update_trade_metrics(self, pair, pnl_eur):
         """Update per-pair win/loss counters and trigger loss-streak pause if needed.
@@ -1944,6 +2007,24 @@ class TradingBot:
                             elif not self._has_sufficient_volume(best_pair):
                                 pass  # already logged inside _has_sufficient_volume
                             else:
+                                # Re-entry guard: block buys for configured pairs until the last closed
+                                # round-trip for that pair achieved min_reentry_profit_pct net profit.
+                                try:
+                                    if any(g in (best_pair or '').upper() for g in self.reentry_guard_pairs):
+                                        last_net = self._last_closed_trade_net_profit_pct(best_pair)
+                                        if last_net is not None and last_net < self.min_reentry_profit_pct:
+                                            self.logger.info(
+                                                f"BUY skipped for {best_pair}: last closed net profit {last_net:.2f}% < min_reentry {self.min_reentry_profit_pct:.2f}%"
+                                            )
+                                            try:
+                                                _notifier.send(
+                                                    f"BUY blocked for {best_pair}: last closed net profit {last_net:.2f}% < {self.min_reentry_profit_pct:.2f}%"
+                                                )
+                                            except Exception:
+                                                pass
+                                            continue
+                                except Exception as _e:
+                                    self.logger.debug(f"Re-entry guard check error for {best_pair}: {_e}")
                                 self.execute_buy_order(best_pair, price)
                         elif best_signal == "SELL":
                             min_vol = self._get_min_volume(best_pair)
@@ -2274,64 +2355,126 @@ class Backtester:
         interval = 60
         initial_balance = 1000.0
 
+        # Fees / guard configuration
+        rm = self.config.get('risk_management', {})
+        fees_maker_pct = float(rm.get('fees_maker_percent', 0.16))
+        fees_taker_pct = float(rm.get('fees_taker_percent', 0.26))
+        exit_slippage_pct = float(rm.get('exit_slippage_buffer_pct', 0.35))
+        min_net_sell = float(rm.get('min_net_sell_profit_pct', 0.0))
+        min_reentry = float(rm.get('min_reentry_profit_pct', 0.0))
+        reentry_pairs = [p.upper() for p in rm.get('reentry_guard_pairs', ['VER'])]
+
         # Fetch OHLC data
         ohlc_data = {}
         for pair in pairs:
             data = self.api_client.get_ohlc_data(pair, interval, int(start_date.timestamp()))
-            if data:
-                ohlc_data[pair] = data
-            else:
+            if not data:
                 self.logger.warning(f"No OHLC data for {pair}")
-        self.kelly_fraction = self._calculate_kelly_fraction()
+                continue
+            # Kraken may return a dict with pair key or a list directly
+            if isinstance(data, dict) and pair in data:
+                series = data.get(pair, [])
+            elif isinstance(data, list):
+                series = data
+            else:
+                series = list(data.values())[0] if isinstance(data, dict) and data else []
+
+            if not series:
+                self.logger.warning(f"No usable OHLC series for {pair}")
+                continue
+            ohlc_data[pair] = series
 
         if not ohlc_data:
             print("No data available for backtesting.")
             return
 
-        # Simulate trading
+        # Simulation state
         balance = initial_balance
         positions = {pair: 0.0 for pair in pairs}
         entry_prices = {pair: 0.0 for pair in pairs}
+        entry_costs = {pair: 0.0 for pair in pairs}  # includes buy fee
+        last_closed_net = {pair: None for pair in pairs}
         pnls = []
         balances = [initial_balance]
-        max_drawdown = 0.0
         peak_balance = initial_balance
 
         analysis = TechnicalAnalysis()
+        primary = pairs[0]
+        series_len = len(ohlc_data[primary])
 
-        for i in range(len(ohlc_data[pairs[0]])):
-            price = float(ohlc_data[pairs[0]][i][4])  # close
-            market_data = {pairs[0]: {'c': [price]}}
-
+        for i in range(series_len):
+            # Use close price
+            price = float(ohlc_data[primary][i][4])
+            market_data = {primary: {'c': [price]}}
             signal, score = analysis.generate_signal_with_score(market_data)
 
-            if signal == 'BUY' and positions[pairs[0]] == 0:
-                volume = balance / price * 0.1
-                positions[pairs[0]] = volume
-                entry_prices[pairs[0]] = price
-                balance -= volume * price
-            elif signal == 'SELL' and positions[pairs[0]] > 0:
-                pnl = (price - entry_prices[pairs[0]]) * positions[pairs[0]]
-                balance += positions[pairs[0]] * price
-                pnls.append(pnl)
-                positions[pairs[0]] = 0
+            if signal == 'BUY' and positions[primary] == 0:
+                # Re-entry guard (if configured for this pair)
+                try:
+                    if any(g in primary.upper() for g in reentry_pairs) and last_closed_net.get(primary) is not None:
+                        if last_closed_net[primary] < min_reentry:
+                            continue
+                except Exception:
+                    pass
 
+                # Determine conservative position size (10% of current equity)
+                volume = (balance * 0.10) / price if price > 0 else 0.0
+                if volume <= 0:
+                    continue
+                cost = volume * price
+                buy_fee = cost * fees_maker_pct / 100.0
+                positions[primary] = volume
+                entry_prices[primary] = price
+                entry_costs[primary] = cost + buy_fee
+                balance -= (cost + buy_fee)
+
+            elif signal == 'SELL' and positions[primary] > 0:
+                # Apply conservative exit slippage
+                sell_price_effective = price * (1.0 - exit_slippage_pct / 100.0)
+                gross_pct = ((sell_price_effective - entry_prices[primary]) / entry_prices[primary]) * 100.0 if entry_prices[primary] > 0 else 0.0
+                fees_total = fees_maker_pct + fees_taker_pct
+                net_pct = gross_pct - fees_total
+
+                # Respect configured minimum net sell profit when set
+                if min_net_sell > 0 and net_pct < min_net_sell:
+                    # skip this sell; let position run
+                    pass
+                else:
+                    proceeds_gross = positions[primary] * sell_price_effective
+                    sell_fee = proceeds_gross * fees_taker_pct / 100.0
+                    proceeds_net = proceeds_gross - sell_fee
+                    balance += proceeds_net
+                    pnl = proceeds_net - entry_costs[primary]
+                    pnls.append(pnl)
+                    last_closed_net[primary] = net_pct
+                    positions[primary] = 0.0
+                    entry_prices[primary] = 0.0
+                    entry_costs[primary] = 0.0
+
+            # update portfolio value
             current_balance = balance + sum(positions[p] * price for p in positions)
             balances.append(current_balance)
             peak_balance = max(peak_balance, current_balance)
-            drawdown = (peak_balance - current_balance) / peak_balance
-            max_drawdown = max(max_drawdown, drawdown)
 
-        # Calculate metrics
-        returns = np.diff(balances) / balances[:-1]
-        total_return = (balances[-1] - initial_balance) / initial_balance
-        sharpe = np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0
-        downside_returns = returns[returns < 0]
-        sortino = np.mean(returns) / np.std(downside_returns) if len(downside_returns) > 0 else 0
+        # Calculate performance metrics
+        try:
+            returns = np.diff(balances) / balances[:-1]
+            total_return = (balances[-1] - initial_balance) / initial_balance
+            sharpe = np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0
+            downside_returns = returns[returns < 0]
+            sortino = np.mean(returns) / np.std(downside_returns) if len(downside_returns) > 0 else 0
+        except Exception:
+            total_return = (balances[-1] - initial_balance) / initial_balance
+            sharpe = 0
+            sortino = 0
 
         print(f"Total Return: {total_return:.2%}")
         print(f"Sharpe Ratio: {sharpe:.2f}")
         print(f"Sortino Ratio: {sortino:.2f}")
+        try:
+            max_drawdown = max((max(balances[:i+1]) - balances[i]) / max(balances[:i+1]) for i in range(1, len(balances)))
+        except Exception:
+            max_drawdown = 0.0
         print(f"Max Drawdown: {max_drawdown:.2%}")
         print(f"Total Trades: {len(pnls)}")
         print(f"Win Rate: {sum(1 for p in pnls if p > 0) / len(pnls):.2%}" if pnls else "Win Rate: N/A")
