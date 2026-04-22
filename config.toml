@@ -1,24 +1,140 @@
-# Configuration File for Kraken Trading Bot
-
 [kraken_api]
-# Store API credentials securely using environment variables or secret managers.
-# Leave empty and use environment variables: KRAKEN_API_KEY and KRAKEN_API_SECRET
 key = ""
 secret = ""
 
 [bot_settings]
 base_currency = "EUR"
 auto_select_pair = true
-# Main-loop sleep interval in seconds (hot-reloadable)
 loop_interval_seconds = 30
+trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
 
-# Kraken-normalized EUR pairs (altname format preferred)
-trade_pairs = [
-    "XXBTZEUR",  # Bitcoin  - highest liquidity, tightest spread
-    "XETHZEUR",  # Ethereum - second most liquid, good intraday volatility
-    "SOLEUR",    # Solana   - volatile, suitable for short-term moves
-    "XXRPZEUR",  # Ripple   - high EUR liquidity on Kraken
-]
+[risk_management]
+max_drawdown_percent = 10.0
+stop_loss_percent = 2.0
+allocation_per_trade_percent = 15.0
+min_buy_score = 20.0
+enable_mean_reversion_signals = true
+enable_trend_breakout_signals = true
+mr_rsi_oversold_threshold = 28
+mr_rsi_overbought_threshold = 62
+enable_regime_filter = true
+regime_benchmark_pair = "XBTEUR"
+regime_min_score = -10.0
+enable_mtf_regime_scoring = true
+mtf_regime_min_score = -5.0
+enable_hard_stop_loss = true
+hard_stop_loss_percent = 2.5
+enable_break_even = true
+break_even_trigger_percent = 1.5
+airbag_drop_threshold = 15.0
+airbag_window_minutes = 10
+enable_sentiment_guard = false
+enable_trading_hours = false
+trading_hours_start_utc = 14
+trading_hours_end_utc = 22
+enable_volume_filter = true
+volume_filter_min_ratio = 0.5
+enable_time_stop = true
+time_stop_hours = 36
+enable_daily_drawdown = true
+daily_loss_limit_percent = 5.0
+risk_off_allocation_multiplier = 0.5
+enable_volatility_targeting = true
+target_volatility_pct = 1.6
+max_consecutive_losses = 2
+pause_after_loss_streak_minutes = 180
+take_profit_percent = 4.0
+adaptive_take_profit = true
+max_take_profit_percent = 12.0
+sell_fee_buffer_percent = 0.45
+fees_maker_percent = 0.16
+fees_taker_percent = 0.26
+reentry_guard_pairs = [ "VER",]
+min_reentry_profit_pct = 5.0
+min_net_sell_profit_pct = 3.0
+exit_slippage_buffer_pct = 0.35
+enable_atr_stop = true
+atr_period = 20
+atr_multiplier = 3.0
+atr_trail_multiplier = 4.0
+enable_atr_dynamic_tp = true
+atr_tp_multiplier = 2.0
+enable_pyramiding = false
+pyramiding_add_pct = 0.5
+max_open_positions = 10
+trade_cooldown_seconds = 10800
+global_trade_cooldown_seconds = 5400
+empty_sell_log_cooldown_seconds = 1800
+min_trade_eur = 10.0
+min_free_margin_buffer = 5.0
+max_notional_per_side = 25.0
+max_open_positions_per_side = 12
+enable_parallel_caps = true
+min_auto_scale_notional = 0.2
+aggressive_autoscale = true
+dynamic_notional_fraction = 0.25
+
+[daytrading]
+enable_daytrading = false
+max_hold_hours = 12
+intraday_sl_percent = 1.5
+intraday_tp_percent = 1.8
+intraday_cooldown_seconds = 1800
+max_consecutive_losses = 2
+loss_streak_pause_minutes = 30
+
+[bear_shield]
+enable_bear_shield = true
+bear_ema_period = 50
+bear_confirm_candles = 3
+bear_benchmark_pair = "XBTEUR"
+bear_log_interval_minutes = 60
+
+[shorting]
+enabled = false
+leverage = "2"
+max_short_notional_eur = 75.0
+short_take_profit_percent = 2.5
+short_stop_loss_percent = 3.0
+
+[logging]
+log_level = "INFO"
+log_to_file = true
+log_file_path = "logs/bot_activity.log"
+fresh_log_on_start = false
+
+[backtesting]
+historical_data_path = "data/historical_prices.csv"
+results_output_path = "backtest_results/"
+
+[reporting]
+generate_trade_reports = true
+report_output_path = "reports/"
+cashflow_refresh_seconds = 60
+
+[execution]
+enable_live_limit_fallback = true
+limit_fallback_timeout_sec = 30
+default_execution_mode = "immediate"
+default_twap_slices = 3
+default_slippage_model = "fixed"
+
+[alerts]
+notify_on = [ "trade", "error",]
+notify_channel = "telegram"
+notify_min_profit_pct = 0.0
+
+[paths]
+nas_root = "/mnt/fritz_nas/Volume/kraken"
+nas_ohlc_2026 = "/mnt/fritz_nas/Volume/kraken/2026"
+nas_ohlc_2025 = "/mnt/fritz_nas/Volume/kraken/2025/ohlcvt"
+nas_bot_cache = "/mnt/fritz_nas/Volume/kraken/bot_cache"
+local_history_buffer = "data/history_buffer.json"
+
+[telegram]
+bot_token = ""
+chat_id = ""
+notify_on = [ "trade", "error", "drawdown",]
 
 [bot_settings.min_volumes]
 XXBTZEUR = 0.0001
@@ -30,230 +146,3 @@ XXRPZEUR = 5.0
 trade_amount_eur = 10.0
 initial_balance = 100.0
 target_balance_eur = 10000.0
-
-[risk_management]
-max_drawdown_percent = 10.0
-stop_loss_percent = 2.0
-# dynamic sizing uses this % of available EUR, capped by trade_amount_eur
-allocation_per_trade_percent = 15.0
-# Entry quality filter: raised from 10 to 15 — fewer but higher-conviction entries
-# reduce fee drag on small account
-min_buy_score = 20.0
-
-# Signal engine mode (reversion_bias variant showed best risk/return balance)
-# Mean-reversion: buy RSI oversold (<33), sell RSI overbought (>67)
-# Trend/breakout: buy Bollinger Band upward breakout
-enable_mean_reversion_signals = true
-enable_trend_breakout_signals = true
-mr_rsi_oversold_threshold = 28
-mr_rsi_overbought_threshold = 62
-
-# Mentor v2 hardening (single auto-bot; no manual mode switching)
-enable_regime_filter = true
-regime_benchmark_pair = "XBTEUR"
-regime_min_score = -10.0
-enable_mtf_regime_scoring = true
-mtf_regime_min_score = -5.0
-# Do not auto-sell at a loss: disable hard stop loss
-enable_hard_stop_loss = true
-hard_stop_loss_percent = 2.5
-
-# Break-Even Stop-Loss (move SL to entry price once in profit)
-enable_break_even = true
-break_even_trigger_percent = 1.5
-
-# Flash-Crash Airbag (Emergency Exit for sharp drops)
-airbag_drop_threshold = 15.0
-airbag_window_minutes = 10
-
-# Optional news/sentiment guard (disabled by default)
-enable_sentiment_guard = false
-
-# Time-of-day filter: only open new positions during high-volume hours (UTC)
-# 14:00-22:00 UTC = EU afternoon + full US session — best liquidity for crypto
-# Enabled: avoids low-volume Asian sessions where spreads are wider
-enable_trading_hours = false
-trading_hours_start_utc = 14
-trading_hours_end_utc = 22
-
-# Volume filter: skip BUY if current 15m candle volume < ratio × 20-candle average
-# 0.5 = must be at least 50% of normal volume
-enable_volume_filter = true
-volume_filter_min_ratio = 0.5
-
-# Sell logic: require minimum profit and allow higher TP in bull run
-enable_time_stop = true
-time_stop_hours = 36
-# Aggressive autonomy: disable daily drawdown cutoff and favor full allocation
-enable_daily_drawdown = true
-daily_loss_limit_percent = 5.0
-# Risk-off sizing: reversion_bias uses 0.50 (vs 0.60 baseline)
-risk_off_allocation_multiplier = 0.50
-enable_volatility_targeting = true
-target_volatility_pct = 1.6
-max_consecutive_losses = 2
-pause_after_loss_streak_minutes = 180
-# Take-profit settings: base 4.5% (sweep-optimised, fees added on top), bull-run cap 7%
-take_profit_percent = 6.0
-adaptive_take_profit = true
-max_take_profit_percent = 12.0
-# Small buffer to cover fees (percent added to required TP)
-# Kraken maker=0.16% entry + taker=0.26% exit = 0.42% minimum; use 0.45% for safety
-sell_fee_buffer_percent = 0.55
-# Estimated exchange fees (percent)
-fees_maker_percent = 0.16
-fees_taker_percent = 0.26
-# Re-entry guard: only pairs listed here are blocked from new BUYs until the
-# last closed trade for that pair had at least min_reentry_profit_pct net profit
-reentry_guard_pairs = ["VER"]
-min_reentry_profit_pct = 5.0
-# Minimum net sell profit (percent, net of fees). When >0, SELLs are blocked
-# until net profit >= this value. Use with caution (may keep losers open).
-min_net_sell_profit_pct = 3.0
-
-# Conservative slippage deduction applied to exit price before TP check (percent)
-# Accounts for thin order books and taker spread on the exit side
-exit_slippage_buffer_pct = 0.35
-
-# ATR stop settings (adaptive stop based on recent volatility)
-enable_atr_stop = true
-atr_period = 20
-atr_multiplier = 3.0
-atr_trail_multiplier = 4.0
-# ATR dynamic take-profit: floor = atr_tp_multiplier × ATR% (prevents exits before capturing the expected move)
-# With atr_tp_multiplier=2.0 and typical 1h ATR ~1.5% for crypto, effective floor ~ 3% (matches base TP)
-# In low-volatility regimes ATR% < 1.5% → floor stays at take_profit_percent; in high-vol ATR 2.5% → floor 5%
-enable_atr_dynamic_tp = true
-atr_tp_multiplier = 2.0
-
-# Pyramiding (add-to-winner) - disabled by default
-enable_pyramiding = false
-pyramiding_add_pct = 0.5  # add when position is this fraction in profit (50% = half way to TP)
-
-# Execution/risk guards
-max_open_positions = 10
-# Cooldowns tuned to reversion_bias: 2h per-pair, 90min global
-# Fewer trades = lower fee drag on small EUR account
-trade_cooldown_seconds = 10800
-global_trade_cooldown_seconds = 5400
-# Suppress repeated empty SELL logs per pair (seconds)
-empty_sell_log_cooldown_seconds = 1800
-min_trade_eur = 10.0
-
-# Parallel trading caps and safety buffer
-# Minimum free margin (EUR) to leave available before placing new opens
-min_free_margin_buffer = 5.0
-# Maximum notional exposure (EUR) allowed per side (long/short)
-max_notional_per_side = 25.0
-# Maximum number of open positions allowed per side
-max_open_positions_per_side = 12
-# Enable enforcement of the parallel caps/rules
-enable_parallel_caps = true
-# Minimum allowable notional for auto-scaled orders (EUR)
-min_auto_scale_notional = 0.2
-# Aggressive autoscale mode: prefer to scale down orders instead of blocking
-aggressive_autoscale = true
-# Dynamic notional scaling factor (fraction of equity to allow per side)
-dynamic_notional_fraction = 0.25
-
-# ── Daytrading mode ──────────────────────────────────────────────────────────
-# When enable_daytrading = true, the bot uses intraday parameters:
-#   • max hold time 12h (force-exit at EOD-ish)
-#   • tighter SL to keep per-trade risk small
-#   • shorter cooldowns so more signals are processed per day
-#   • lower base TP target (1-3% moves are intraday-achievable on 1h crypto)
-[daytrading]
-enable_daytrading = false
-# Exit any open position after this many hours regardless of P&L (force flat)
-max_hold_hours = 12
-# Intraday hard stop-loss (tighter than swing-trade SL)
-intraday_sl_percent = 1.5
-# Intraday base TP target (ATR-dynamic will raise this in volatile markets)
-intraday_tp_percent = 1.8
-# Per-pair cooldown for daytrading (seconds). 30 min = can trade twice a session
-intraday_cooldown_seconds = 1800
-# After N consecutive losses, pause for X minutes and then reset
-max_consecutive_losses = 2
-loss_streak_pause_minutes = 30
-
-# ── Bear Shield ──────────────────────────────────────────────────────────────
-# When enabled: if price stays below EMA(ema_period) on the 4h chart for
-# bear_confirm_candles consecutive 4h candles, the bot:
-#   1. Skips all new BUY orders (stays in FIAT)
-#   2. Sells ALL open positions at market (park everything in EUR)
-# Bull re-entry is allowed only when price closes above EMA again.
-[bear_shield]
-enable_bear_shield = true
-# EMA period on 4h data to define trend (50 = ~8 days)
-bear_ema_period = 50
-# How many consecutive 4h candles must close below EMA before triggering
-bear_confirm_candles = 3
-# Benchmark pair to measure trend on (usually your best-liquidity pair)
-bear_benchmark_pair = "XBTEUR"
-# Log a message every N minutes when in bear mode (0 = only on state change)
-bear_log_interval_minutes = 60
-
-[shorting]
-enabled = false
-leverage = "2"
-max_short_notional_eur = 75.0
-# Separate (lower) take-profit for shorts — quick moves in downtrends
-# Set lower than long TP to lock in profits fast before reversals
-short_take_profit_percent = 2.5
-# Stop-loss for shorts: close if price moves this % against us (upward)
-short_stop_loss_percent = 3.0
-
-[logging]
-log_level = "INFO"
-log_to_file = true
-log_file_path = "logs/bot_activity.log"
-# Logs rotate at 5 MB (5 backups kept). fresh_log_on_start is no longer used.
-fresh_log_on_start = false
-
-[backtesting]
-historical_data_path = "data/historical_prices.csv"
-results_output_path = "backtest_results/"
-
-[reporting]
-generate_trade_reports = true
-report_output_path = "reports/"
-# How often (seconds) to re-read EUR deposits/withdrawals from Kraken ledger.
-# 60s means a new deposit is visible to the bot within 1 minute.
-cashflow_refresh_seconds = 60
-
-[execution]
-# Live execution options
-enable_live_limit_fallback = true
-limit_fallback_timeout_sec = 30
-# Default execution mode for live orders: immediate, twap, vwap
-default_execution_mode = "immediate"
-default_twap_slices = 3
-# Slippage model to use for sim + estimation: fixed or volatility
-default_slippage_model = "fixed"
-
-[alerts]
-# Notify on successful trades and critical errors
-notify_on = ["trade", "error"]
-notify_channel = "telegram"
-notify_min_profit_pct = 0.0
-
-# ── Paths ─────────────────────────────────────────────────────────────────────
-[paths]
-# NAS root directory (unified kraken/ folder). Override here if mount point changes.
-nas_root = "/mnt/fritz_nas/Volume/kraken"
-# Derived NAS paths (relative to nas_root — override only if structure differs)
-nas_ohlc_2026 = "/mnt/fritz_nas/Volume/kraken/2026"
-nas_ohlc_2025 = "/mnt/fritz_nas/Volume/kraken/2025/ohlcvt"
-nas_bot_cache  = "/mnt/fritz_nas/Volume/kraken/bot_cache"
-# Local runtime cache (small, ephemeral — stays on disk not NAS)
-local_history_buffer = "data/history_buffer.json"
-
-# ── Telegram Notifications ────────────────────────────────────────────────────
-[telegram]
-# Get token from @BotFather → /newbot
-bot_token = ""
-# Get chat_id: send a message to your bot, then:
-#   curl https://api.telegram.org/bot<TOKEN>/getUpdates
-chat_id = ""
-# Which events to notify (trade=every buy/sell, error=critical errors, drawdown=DD warnings)
-notify_on = ["trade", "error", "drawdown"]
