@@ -2357,9 +2357,25 @@ class Backtester:
 
         # Fees / guard configuration
         rm = self.config.get('risk_management', {})
-        fees_maker_pct = float(rm.get('fees_maker_percent', 0.16))
-        fees_taker_pct = float(rm.get('fees_taker_percent', 0.26))
-        exit_slippage_pct = float(rm.get('exit_slippage_buffer_pct', 0.35))
+        # Support fees expressed either as percentage (e.g. 0.26 for 0.26%)
+        # or as decimal fraction (e.g. 0.0026). Normalize to fraction (0.0026).
+        def _pct_to_frac(v):
+            try:
+                f = float(v)
+            except Exception:
+                return 0.0
+            if f > 1:
+                # value looks like '26' -> treat as percent
+                return f / 100.0
+            if 0.01 <= f <= 1.0:
+                # value looks like '0.26' -> percent expressed as 0.26 (0.26%)
+                return f / 100.0
+            # otherwise already fraction (e.g. 0.0026)
+            return f
+
+        fees_maker_frac = _pct_to_frac(rm.get('fees_maker_percent', 0.16))
+        fees_taker_frac = _pct_to_frac(rm.get('fees_taker_percent', 0.26))
+        exit_slippage_frac = _pct_to_frac(rm.get('exit_slippage_buffer_pct', 0.35))
         min_net_sell = float(rm.get('min_net_sell_profit_pct', 0.0))
         min_reentry = float(rm.get('min_reentry_profit_pct', 0.0))
         reentry_pairs = [p.upper() for p in rm.get('reentry_guard_pairs', ['VER'])]
@@ -2422,7 +2438,7 @@ class Backtester:
                 if volume <= 0:
                     continue
                 cost = volume * price
-                buy_fee = cost * fees_maker_pct / 100.0
+                buy_fee = cost * fees_maker_frac
                 positions[primary] = volume
                 entry_prices[primary] = price
                 entry_costs[primary] = cost + buy_fee
@@ -2430,10 +2446,10 @@ class Backtester:
 
             elif signal == 'SELL' and positions[primary] > 0:
                 # Apply conservative exit slippage
-                sell_price_effective = price * (1.0 - exit_slippage_pct / 100.0)
+                sell_price_effective = price * (1.0 - exit_slippage_frac)
                 gross_pct = ((sell_price_effective - entry_prices[primary]) / entry_prices[primary]) * 100.0 if entry_prices[primary] > 0 else 0.0
-                fees_total = fees_maker_pct + fees_taker_pct
-                net_pct = gross_pct - fees_total
+                fees_total_pct = (fees_maker_frac + fees_taker_frac) * 100.0
+                net_pct = gross_pct - fees_total_pct
 
                 # Respect configured minimum net sell profit when set
                 if min_net_sell > 0 and net_pct < min_net_sell:
@@ -2441,7 +2457,7 @@ class Backtester:
                     pass
                 else:
                     proceeds_gross = positions[primary] * sell_price_effective
-                    sell_fee = proceeds_gross * fees_taker_pct / 100.0
+                    sell_fee = proceeds_gross * fees_taker_frac
                     proceeds_net = proceeds_gross - sell_fee
                     balance += proceeds_net
                     pnl = proceeds_net - entry_costs[primary]
