@@ -414,10 +414,23 @@ class KrakenAPI:
                 if desired_notional is not None and desired_notional > final_allowed:
                     # scale down if aggressive, otherwise block
                     if final_allowed < min_auto_notional:
-                        self.logger.info(
-                            f"Blocking order: not enough allowed notional ({final_allowed:.2f} EUR) "
-                            f"to place requested {desired_notional:.2f} EUR"
-                        )
+                        # Provide detailed debug info to help diagnose why allowed notional
+                        # is below the configured minimum. Keep blocking behavior unchanged.
+                        try:
+                            self.logger.info(
+                                f"Blocking order: not enough allowed notional ({final_allowed:.2f} EUR) "
+                                f"to place requested {desired_notional:.2f} EUR"
+                            )
+                            self.logger.debug(
+                                "Notional preflight details: "
+                                f"pair={pair} dir={direction} desired_price={desired_price} "
+                                f"desired_notional={desired_notional} min_auto_notional={min_auto_notional} "
+                                f"allowed_by_side={allowed_by_side:.2f} allowed_by_margin={allowed_by_margin:.2f} "
+                                f"final_allowed={final_allowed:.2f} equity={equity:.2f} mf={mf:.2f}"
+                            )
+                        except Exception:
+                            # best-effort logging; do not raise
+                            pass
                         return None
                     scale = final_allowed / desired_notional
                     new_volume = float(volume) * scale
