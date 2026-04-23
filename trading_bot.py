@@ -2411,7 +2411,16 @@ class Backtester:
         peak_balance = initial_balance
 
         analysis = TechnicalAnalysis()
-        primary = pairs[0]
+        # Pick the first available series that actually has data
+        primary = None
+        for p in pairs:
+            if p in ohlc_data and ohlc_data[p]:
+                primary = p
+                break
+        if primary is None:
+            # fallback to any available key
+            primary = next(iter(ohlc_data.keys()))
+            self.logger.warning(f"Primary pair {pairs[0]} had no data; using {primary} instead")
         series_len = len(ohlc_data[primary])
 
         for i in range(series_len):
