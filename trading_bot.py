@@ -74,7 +74,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from analysis import TechnicalAnalysis
-from utils import load_config
+from utils import load_config, pct_to_frac, apply_trade_costs
 
 # Load .env if python-dotenv is available (graceful fallback otherwise)
 try:
@@ -177,6 +177,13 @@ class TradingBot:
         # Explicit fee estimates (percent): used for net-profit calculations and guards
         self.fees_maker_percent = float(self.config.get('risk_management', {}).get('fees_maker_percent', 0.16))
         self.fees_taker_percent = float(self.config.get('risk_management', {}).get('fees_taker_percent', 0.26))
+        # Normalized fee fractions (e.g. 0.0026 for 0.26%) — use pct_to_frac for consistency
+        try:
+            self.fees_maker_frac = pct_to_frac(self.fees_maker_percent)
+            self.fees_taker_frac = pct_to_frac(self.fees_taker_percent)
+        except Exception:
+            self.fees_maker_frac = 0.0
+            self.fees_taker_frac = 0.0
         # Re-entry guard: only pairs listed here are subject to blocking new BUYs until
         # the last closed trade for that pair achieved min_reentry_profit_pct net profit
         self.reentry_guard_pairs = [p.upper() for p in self.config.get('risk_management', {}).get('reentry_guard_pairs', ['VER'])]
@@ -642,6 +649,14 @@ class TradingBot:
             self.max_consecutive_losses = int(self.config.get('risk_management', {}).get('max_consecutive_losses', self.max_consecutive_losses))
             self.pause_after_loss_streak_minutes = int(self.config.get('risk_management', {}).get('pause_after_loss_streak_minutes', self.pause_after_loss_streak_minutes))
             self.sell_fee_buffer_percent = float(self.config.get('risk_management', {}).get('sell_fee_buffer_percent', self.sell_fee_buffer_percent))
+            # Refresh normalized fee fractions whenever config is reloaded
+            try:
+                self.fees_maker_frac = pct_to_frac(float(self.config.get('risk_management', {}).get('fees_maker_percent', self.fees_maker_percent)))
+                self.fees_taker_frac = pct_to_frac(float(self.config.get('risk_management', {}).get('fees_taker_percent', self.fees_taker_percent)))
+            except Exception:
+                # keep previous values on error
+                self.fees_maker_frac = getattr(self, 'fees_maker_frac', 0.0)
+                self.fees_taker_frac = getattr(self, 'fees_taker_frac', 0.0)
             self.enable_sentiment_guard = bool(self.config.get('risk_management', {}).get('enable_sentiment_guard', self.enable_sentiment_guard))
             # Signal engine mode reload
             self.enable_mr_signals = bool(self.config.get('risk_management', {}).get('enable_mean_reversion_signals', self.enable_mr_signals))
@@ -1485,8 +1500,11 @@ class TradingBot:
                     if buy_price <= 0:
                         return None
                     gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
-                    fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
-                    net_pct = gross_pct - fees_total
+                    # fees are stored in config as percent-like values (e.g. 0.16 meaning 0.16%).
+                    # Normalize to fractions and convert to percent for subtraction.
+                    fees_total_frac = pct_to_frac(getattr(self, 'fees_maker_percent', 0.0)) + pct_to_frac(getattr(self, 'fees_taker_percent', 0.0))
+                    fees_total_pct = fees_total_frac * 100.0
+                    net_pct = gross_pct - fees_total_pct
                     return net_pct
             return None
         except Exception:
@@ -1562,8 +1580,9 @@ class TradingBot:
         # enforce minimum NET profit (after estimated fees) if configured
         min_net = float(self.config.get('risk_management', {}).get('min_net_sell_profit_pct', self.min_net_sell_profit_pct))
         if min_net > 0:
-            fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
-            net_profit_pct = profit_pct - fees_total
+            fees_total_frac = pct_to_frac(getattr(self, 'fees_maker_percent', 0.0)) + pct_to_frac(getattr(self, 'fees_taker_percent', 0.0))
+            fees_total_pct = fees_total_frac * 100.0
+            net_profit_pct = profit_pct - fees_total_pct
             return net_profit_pct >= min_net
         return True
 
