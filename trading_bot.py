@@ -74,7 +74,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from analysis import TechnicalAnalysis
-from utils import load_config
+from utils import load_config, pct_to_frac, apply_trade_costs, append_jsonl_locked, last_closed_trade_net_profit_pct
 
 # Load .env if python-dotenv is available (graceful fallback otherwise)
 try:
@@ -177,6 +177,13 @@ class TradingBot:
         # Explicit fee estimates (percent): used for net-profit calculations and guards
         self.fees_maker_percent = float(self.config.get('risk_management', {}).get('fees_maker_percent', 0.16))
         self.fees_taker_percent = float(self.config.get('risk_management', {}).get('fees_taker_percent', 0.26))
+        # Normalized fee fractions (e.g. 0.0026 for 0.26%) — use pct_to_frac for consistency
+        try:
+            self.fees_maker_frac = pct_to_frac(self.fees_maker_percent)
+            self.fees_taker_frac = pct_to_frac(self.fees_taker_percent)
+        except Exception:
+            self.fees_maker_frac = 0.0
+            self.fees_taker_frac = 0.0
         # Re-entry guard: only pairs listed here are subject to blocking new BUYs until
         # the last closed trade for that pair achieved min_reentry_profit_pct net profit
         self.reentry_guard_pairs = [p.upper() for p in self.config.get('risk_management', {}).get('reentry_guard_pairs', ['VER'])]
@@ -642,6 +649,14 @@ class TradingBot:
             self.max_consecutive_losses = int(self.config.get('risk_management', {}).get('max_consecutive_losses', self.max_consecutive_losses))
             self.pause_after_loss_streak_minutes = int(self.config.get('risk_management', {}).get('pause_after_loss_streak_minutes', self.pause_after_loss_streak_minutes))
             self.sell_fee_buffer_percent = float(self.config.get('risk_management', {}).get('sell_fee_buffer_percent', self.sell_fee_buffer_percent))
+            # Refresh normalized fee fractions whenever config is reloaded
+            try:
+                self.fees_maker_frac = pct_to_frac(float(self.config.get('risk_management', {}).get('fees_maker_percent', self.fees_maker_percent)))
+                self.fees_taker_frac = pct_to_frac(float(self.config.get('risk_management', {}).get('fees_taker_percent', self.fees_taker_percent)))
+            except Exception:
+                # keep previous values on error
+                self.fees_maker_frac = getattr(self, 'fees_maker_frac', 0.0)
+                self.fees_taker_frac = getattr(self, 'fees_taker_frac', 0.0)
             self.enable_sentiment_guard = bool(self.config.get('risk_management', {}).get('enable_sentiment_guard', self.enable_sentiment_guard))
             # Signal engine mode reload
             self.enable_mr_signals = bool(self.config.get('risk_management', {}).get('enable_mean_reversion_signals', self.enable_mr_signals))
@@ -1446,49 +1461,11 @@ class TradingBot:
     def _last_closed_trade_net_profit_pct(self, pair):
         """Return the net profit percent of the last closed (BUY->SELL) roundtrip for *pair*.
 
-        Algorithm: read structured JSONL trade log (self.json_journal_path), find the
-        most recent SELL for the pair and the preceding BUY for the same pair, then
-        compute gross percent = (sell_price - buy_price)/buy_price*100 and subtract
-        estimated fees (maker+taker) to produce a conservative net percent.
-
-        Returns float percent or None if no matching history found.
+        Delegates to utils.last_closed_trade_net_profit_pct which performs a
+        locked read of the JSONL journal and normalizes fee inputs consistently.
         """
         try:
-            if not os.path.exists(self.json_journal_path):
-                return None
-            with open(self.json_journal_path, 'r') as jf:
-                lines = jf.read().splitlines()
-            # scan from the end to find last SELL for this pair
-            for i in range(len(lines) - 1, -1, -1):
-                try:
-                    j = json.loads(lines[i])
-                except Exception:
-                    continue
-                if (j.get('pair') or '').upper() != (pair or '').upper():
-                    continue
-                if j.get('type', '').upper() == 'SELL':
-                    sell = j
-                    # find the preceding BUY for the same pair
-                    buy = None
-                    for k in range(i - 1, -1, -1):
-                        try:
-                            b = json.loads(lines[k])
-                        except Exception:
-                            continue
-                        if (b.get('pair') or '').upper() == (pair or '').upper() and b.get('type', '').upper() == 'BUY':
-                            buy = b
-                            break
-                    if not buy:
-                        return None
-                    buy_price = float(buy.get('price', 0.0) or 0.0)
-                    sell_price = float(sell.get('price', 0.0) or 0.0)
-                    if buy_price <= 0:
-                        return None
-                    gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
-                    fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
-                    net_pct = gross_pct - fees_total
-                    return net_pct
-            return None
+            return last_closed_trade_net_profit_pct(self.json_journal_path, pair, self.fees_maker_percent, self.fees_taker_percent)
         except Exception:
             return None
 
@@ -1562,8 +1539,9 @@ class TradingBot:
         # enforce minimum NET profit (after estimated fees) if configured
         min_net = float(self.config.get('risk_management', {}).get('min_net_sell_profit_pct', self.min_net_sell_profit_pct))
         if min_net > 0:
-            fees_total = float(getattr(self, 'fees_maker_percent', 0.0)) + float(getattr(self, 'fees_taker_percent', 0.0))
-            net_profit_pct = profit_pct - fees_total
+            fees_total_frac = pct_to_frac(getattr(self, 'fees_maker_percent', 0.0)) + pct_to_frac(getattr(self, 'fees_taker_percent', 0.0))
+            fees_total_pct = fees_total_frac * 100.0
+            net_profit_pct = profit_pct - fees_total_pct
             return net_profit_pct >= min_net
         return True
 
@@ -2105,10 +2083,12 @@ class TradingBot:
                         j['current_drawdown_pct'] = round(((peak - j['balance_eur']) / peak) * 100.0, 2)
                 except Exception:
                     pass
-                with open(self.json_journal_path, 'a') as jf:
-                    jf.write(json.dumps(j) + "\n")
-            except Exception as e:
-                self.logger.error(f"Error writing JSON trade log: {e}")
+                try:
+                    ok = append_jsonl_locked(self.json_journal_path, j)
+                    if not ok:
+                        self.logger.error("Error writing JSON trade log: append_jsonl_locked returned False")
+                except Exception as e:
+                    self.logger.error(f"Error writing JSON trade log: {e}")
         except Exception as e:
             self.logger.error(f"Error writing trade journal: {e}")
 
@@ -2357,9 +2337,25 @@ class Backtester:
 
         # Fees / guard configuration
         rm = self.config.get('risk_management', {})
-        fees_maker_pct = float(rm.get('fees_maker_percent', 0.16))
-        fees_taker_pct = float(rm.get('fees_taker_percent', 0.26))
-        exit_slippage_pct = float(rm.get('exit_slippage_buffer_pct', 0.35))
+        # Support fees expressed either as percentage (e.g. 0.26 for 0.26%)
+        # or as decimal fraction (e.g. 0.0026). Normalize to fraction (0.0026).
+        def _pct_to_frac(v):
+            try:
+                f = float(v)
+            except Exception:
+                return 0.0
+            if f > 1:
+                # value looks like '26' -> treat as percent
+                return f / 100.0
+            if 0.01 <= f <= 1.0:
+                # value looks like '0.26' -> percent expressed as 0.26 (0.26%)
+                return f / 100.0
+            # otherwise already fraction (e.g. 0.0026)
+            return f
+
+        fees_maker_frac = _pct_to_frac(rm.get('fees_maker_percent', 0.16))
+        fees_taker_frac = _pct_to_frac(rm.get('fees_taker_percent', 0.26))
+        exit_slippage_frac = _pct_to_frac(rm.get('exit_slippage_buffer_pct', 0.35))
         min_net_sell = float(rm.get('min_net_sell_profit_pct', 0.0))
         min_reentry = float(rm.get('min_reentry_profit_pct', 0.0))
         reentry_pairs = [p.upper() for p in rm.get('reentry_guard_pairs', ['VER'])]
@@ -2422,7 +2418,7 @@ class Backtester:
                 if volume <= 0:
                     continue
                 cost = volume * price
-                buy_fee = cost * fees_maker_pct / 100.0
+                buy_fee = cost * fees_maker_frac
                 positions[primary] = volume
                 entry_prices[primary] = price
                 entry_costs[primary] = cost + buy_fee
@@ -2430,10 +2426,10 @@ class Backtester:
 
             elif signal == 'SELL' and positions[primary] > 0:
                 # Apply conservative exit slippage
-                sell_price_effective = price * (1.0 - exit_slippage_pct / 100.0)
+                sell_price_effective = price * (1.0 - exit_slippage_frac)
                 gross_pct = ((sell_price_effective - entry_prices[primary]) / entry_prices[primary]) * 100.0 if entry_prices[primary] > 0 else 0.0
-                fees_total = fees_maker_pct + fees_taker_pct
-                net_pct = gross_pct - fees_total
+                fees_total_pct = (fees_maker_frac + fees_taker_frac) * 100.0
+                net_pct = gross_pct - fees_total_pct
 
                 # Respect configured minimum net sell profit when set
                 if min_net_sell > 0 and net_pct < min_net_sell:
@@ -2441,7 +2437,7 @@ class Backtester:
                     pass
                 else:
                     proceeds_gross = positions[primary] * sell_price_effective
-                    sell_fee = proceeds_gross * fees_taker_pct / 100.0
+                    sell_fee = proceeds_gross * fees_taker_frac
                     proceeds_net = proceeds_gross - sell_fee
                     balance += proceeds_net
                     pnl = proceeds_net - entry_costs[primary]
