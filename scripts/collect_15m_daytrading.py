@@ -17,10 +17,11 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import nas_paths as _nas_paths
 
@@ -87,7 +88,9 @@ def fetch_ohlc_15m(pair: str, since: int, end_ts: int) -> dict:
         nxt = int(res.get("last", last_ts + 1))
         current = nxt if nxt > current else (last_ts + 1)
 
-        print(f"  [{pair}] fetched {new_rows} bars up to {datetime.fromtimestamp(last_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')}")
+        print(
+            f"  [{pair}] fetched {new_rows} bars up to {datetime.fromtimestamp(last_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        )
 
         if new_rows == 0:
             break
@@ -118,7 +121,9 @@ def collect_pair(pair: str, days: int) -> None:
             existing_data = {int(k): float(v) for k, v in json.loads(latest.read_text()).items()}
             if existing_data:
                 resume_from = max(existing_data.keys()) + (INTERVAL * 60)
-                print(f"[{pair}] Resuming from {datetime.fromtimestamp(resume_from, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')} ({len(existing_data)} bars already cached)")
+                print(
+                    f"[{pair}] Resuming from {datetime.fromtimestamp(resume_from, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')} ({len(existing_data)} bars already cached)"
+                )
         except Exception:
             pass
 
@@ -126,7 +131,9 @@ def collect_pair(pair: str, days: int) -> None:
         print(f"[{pair}] Already up to date ({len(existing_data)} bars)")
         return
 
-    print(f"[{pair}] Collecting {INTERVAL}m bars: {datetime.fromtimestamp(resume_from, tz=timezone.utc).strftime('%Y-%m-%d')} → now")
+    print(
+        f"[{pair}] Collecting {INTERVAL}m bars: {datetime.fromtimestamp(resume_from, tz=timezone.utc).strftime('%Y-%m-%d')} → now"
+    )
     new_data = fetch_ohlc_15m(pair, resume_from, end_ts)
 
     if not new_data and not existing_data:
@@ -168,9 +175,7 @@ def main():
         time.sleep(0.3)
 
     total_bars = sum(
-        len(json.loads(f.read_text()))
-        for p in pairs
-        for f in sorted(OUT_DIR.glob(f"{p}_*_15m.json"))[-1:]
+        len(json.loads(f.read_text())) for p in pairs for f in sorted(OUT_DIR.glob(f"{p}_*_15m.json"))[-1:]
     )
     print(f"\nDone. Total bars available: {total_bars:,}")
     print(f"Output: {OUT_DIR.resolve()}/")

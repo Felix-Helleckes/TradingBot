@@ -7,7 +7,10 @@ Usage:
     3. Add the printed TELEGRAM_CHAT_ID to /home/felix/tradingbot/.env
     4. Restart the bot: sudo systemctl restart kraken-bot
 """
-import os, sys, requests
+import os
+import sys
+
+import requests
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 if not TOKEN:

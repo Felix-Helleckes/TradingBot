@@ -11,6 +11,7 @@ Cron entry (runs every day at 09:00):
   0 9 * * * /home/felix/tradingbot/venv/bin/python /home/felix/tradingbot/scripts/daily_balance_report.py
 """
 from __future__ import annotations
+
 import json
 import os
 import sys
@@ -28,17 +29,16 @@ if _env.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
-import requests
 import krakenex
-
+import requests
 
 # Kraken asset → EUR Ticker pair
 _ASSET_PAIRS = {
     "XXBT": "XXBTZEUR",
     "XETH": "XETHZEUR",
-    "SOL":  "SOLEUR",
-    "ADA":  "ADAEUR",
-    "DOT":  "DOTEUR",
+    "SOL": "SOLEUR",
+    "ADA": "ADAEUR",
+    "DOT": "DOTEUR",
     "XXRP": "XXRPZEUR",
     "LINK": "LINKEUR",
 }
@@ -143,8 +143,7 @@ def main() -> None:
     message = (
         f"📊 <b>Täglicher Kontostand</b>\n"
         f"🕘 {now}\n\n"
-        f"💰 <b>Gesamt: {total:.2f} EUR</b>\n"
-        + "\n".join(detail_lines) + "\n\n"
+        f"💰 <b>Gesamt: {total:.2f} EUR</b>\n" + "\n".join(detail_lines) + "\n\n"
         f"{pnl_sign} <b>Gesamt-P&amp;L:</b> {cumulative_pnl:+.2f} EUR ({pnl_pct:+.2f}%)\n"
         f"  Startkapital: {start_eur:.2f} EUR (seit {start_date})"
     )
@@ -155,4 +154,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

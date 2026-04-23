@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ except ImportError:
     except ImportError:
         try:
             import toml as tomllib  # pip install toml (in requirements.txt)
+
             tomllib._binary_mode = False  # toml reads text, not bytes
         except ImportError:
             tomllib = None
@@ -40,29 +40,29 @@ except ImportError:
 _CFG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
 _CFG: dict = {}
 if tomllib is not None and _CFG_PATH.exists():
-    _binary = not getattr(tomllib, "_binary_mode", True) is False
+    _binary = getattr(tomllib, "_binary_mode", True) is not False
     _open_mode = "rb" if _binary else "r"
     with open(_CFG_PATH, _open_mode) as _f:
         _CFG = tomllib.load(_f)
 _RM = _CFG.get("risk_management", {})
 
 # Signal engine params (read from config, same as analysis.py)
-_ENABLE_MR     = bool(_RM.get("enable_mean_reversion_signals", True))
-_ENABLE_TREND  = bool(_RM.get("enable_trend_breakout_signals", True))
-_MR_OVERSOLD   = float(_RM.get("mr_rsi_oversold_threshold", 33.0))
+_ENABLE_MR = bool(_RM.get("enable_mean_reversion_signals", True))
+_ENABLE_TREND = bool(_RM.get("enable_trend_breakout_signals", True))
+_MR_OVERSOLD = float(_RM.get("mr_rsi_oversold_threshold", 33.0))
 _MR_OVERBOUGHT = float(_RM.get("mr_rsi_overbought_threshold", 67.0))
 
 # Risk/position params from config
-_MIN_BUY_SCORE      = float(_RM.get("min_buy_score", 8.0))
+_MIN_BUY_SCORE = float(_RM.get("min_buy_score", 8.0))
 _TRADE_COOLDOWN_SEC = int(_RM.get("trade_cooldown_seconds", 3600))
-_RISK_OFF_MULT      = float(_RM.get("risk_off_allocation_multiplier", 0.50))
-_REGIME_MIN_SCORE   = float(_RM.get("regime_min_score", -10.0))
+_RISK_OFF_MULT = float(_RM.get("risk_off_allocation_multiplier", 0.50))
+_REGIME_MIN_SCORE = float(_RM.get("regime_min_score", -10.0))
 # ATR dynamic TP: floor = _ATR_TP_MULT × ATR% of close prices (prevents early exits)
-_ENABLE_ATR_TP  = bool(_RM.get("enable_atr_dynamic_tp", True))
-_ATR_TP_MULT    = float(_RM.get("atr_tp_multiplier", 2.0))
-_BASE_TP_PCT    = float(_RM.get("take_profit_percent", 3.0))
-_MAX_TP_PCT     = float(_RM.get("max_take_profit_percent", 7.0))
-_ATR_PERIOD     = int(_RM.get("atr_period", 14))
+_ENABLE_ATR_TP = bool(_RM.get("enable_atr_dynamic_tp", True))
+_ATR_TP_MULT = float(_RM.get("atr_tp_multiplier", 2.0))
+_BASE_TP_PCT = float(_RM.get("take_profit_percent", 3.0))
+_MAX_TP_PCT = float(_RM.get("max_take_profit_percent", 7.0))
+_ATR_PERIOD = int(_RM.get("atr_period", 14))
 
 # Read pairs from live config so backtest matches the real bot's universe
 PAIRS = _CFG.get("bot_settings", {}).get("trade_pairs", ["XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR"])
@@ -98,7 +98,7 @@ def _pair_file_candidates(pair: str) -> List[str]:
 def load_local_timesales_ohlc(pair: str, since_ts: int, end_ts: int, interval: int = 60) -> Dict[int, float]:
     if not LOCAL_TS_DIR.exists():
         return {}
-    
+
     # Try subfolder structure: pair/ohlc_{interval}m.csv
     fpath = LOCAL_TS_DIR / pair / f"ohlc_{interval}m.csv"
     if not fpath.exists():
@@ -108,7 +108,7 @@ def load_local_timesales_ohlc(pair: str, since_ts: int, end_ts: int, interval: i
             if p.exists():
                 fpath = p
                 break
-    
+
     if fpath is None or not fpath.exists():
         return {}
 
@@ -146,8 +146,7 @@ def fetch_ohlc(pair: str, since_ts: int, end_ts: int, interval: int = 60) -> Dic
     # 2. mentor_cache_1h — use if coverage ≥ threshold (env var override for sweeps)
     _COVERAGE_THRESHOLD = float(os.getenv("BT_COVERAGE_THRESHOLD", "0.70"))
     if MENTOR_CACHE_DIR.exists():
-        candidates = sorted(MENTOR_CACHE_DIR.glob(f"{pair}_*_60m.json"),
-                            key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates = sorted(MENTOR_CACHE_DIR.glob(f"{pair}_*_60m.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
             # Merge all available cache files for this pair for maximum coverage
             merged: Dict[int, float] = {}
@@ -292,10 +291,10 @@ def strategy_signal(prices: List[float]) -> Tuple[str, float]:
     return signal, max(-50.0, min(50.0, score))
 
 
-def compute_slip_for_pair(hist_prices: List[float], slippage_bps: float, model: str = 'fixed') -> float:
+def compute_slip_for_pair(hist_prices: List[float], slippage_bps: float, model: str = "fixed") -> float:
     """Compute slip fraction (e.g. 0.0008 for 8 bps) for a pair given recent history and model."""
     base = max(0.0, float(slippage_bps)) / 10000.0
-    if model == 'fixed' or not hist_prices or len(hist_prices) < 5:
+    if model == "fixed" or not hist_prices or len(hist_prices) < 5:
         return base
     try:
         arr = np.array(hist_prices)
@@ -310,7 +309,19 @@ def compute_slip_for_pair(hist_prices: List[float], slippage_bps: float, model: 
         return base
 
 
-def simulate_twap_entry(pair: str, direction: int, allocation: float, idx: int, all_ts: List[int], series: Dict[str, Dict[int, float]], hist: Dict[str, deque], slices: int, slippage_bps: float, slippage_model: str, fee_rate: float):
+def simulate_twap_entry(
+    pair: str,
+    direction: int,
+    allocation: float,
+    idx: int,
+    all_ts: List[int],
+    series: Dict[str, Dict[int, float]],
+    hist: Dict[str, deque],
+    slices: int,
+    slippage_bps: float,
+    slippage_model: str,
+    fee_rate: float,
+):
     """Simulate a TWAP-style entry across the next `slices` timestamps. Returns (entry_price, total_qty, total_fee).
 
     If insufficient future timestamps exist, uses available ones and repeats last price.
@@ -335,7 +346,11 @@ def simulate_twap_entry(pair: str, direction: int, allocation: float, idx: int, 
                 p = list(series.get(pair, {}).values())[-1] if series.get(pair) else 0.0
         else:
             # repeat last available
-            p = list(hist.get(pair, []))[-1] if hist.get(pair) else (list(series.get(pair, {}).values())[-1] if series.get(pair) else 0.0)
+            p = (
+                list(hist.get(pair, []))[-1]
+                if hist.get(pair)
+                else (list(series.get(pair, {}).values())[-1] if series.get(pair) else 0.0)
+            )
         prices.append(p)
     # simulate slices
     qtys = []
@@ -362,7 +377,7 @@ def _atr_dynamic_tp(prices: List[float]) -> float:
     """
     if not _ENABLE_ATR_TP or len(prices) < _ATR_PERIOD + 1:
         return _BASE_TP_PCT
-    recent = prices[-(_ATR_PERIOD + 1):]
+    recent = prices[-(_ATR_PERIOD + 1) :]
     trs = [abs(recent[i] - recent[i - 1]) for i in range(1, len(recent))]
     atr = sum(trs) / len(trs)
     last_price = recent[-1]
@@ -372,23 +387,47 @@ def _atr_dynamic_tp(prices: List[float]) -> float:
     return min(_MAX_TP_PCT, max(_BASE_TP_PCT, _ATR_TP_MULT * atr_pct))
 
 
-def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: float, execution_mode: str = 'immediate', twap_slices: int = 3, slippage_model: str = 'fixed', daytrading: bool = False) -> dict:
+def run_backtest(
+    days: int,
+    initial_eur: float,
+    fee_rate: float,
+    slippage_bps: float,
+    execution_mode: str = "immediate",
+    twap_slices: int = 3,
+    slippage_model: str = "fixed",
+    daytrading: bool = False,
+) -> dict:
     # daytrading flag from CLI overrides config; otherwise use config value
     _DT = _CFG.get("daytrading", {})
     dt_enabled = daytrading  # CLI flag is the one source of truth for backtest
-    dt_max_hold_h   = float(_DT.get("max_hold_hours", 12))
-    dt_sl           = -abs(float(_DT.get("intraday_sl_percent", 1.5)))
-    dt_tp_base      = float(_DT.get("intraday_tp_percent", 1.8))
+    dt_max_hold_h = float(_DT.get("max_hold_hours", 12))
+    dt_sl = -abs(float(_DT.get("intraday_sl_percent", 1.5)))
+    dt_tp_base = float(_DT.get("intraday_tp_percent", 1.8))
     dt_cooldown_sec = int(_DT.get("intraday_cooldown_seconds", 1800))
-    dt_max_losses   = int(_DT.get("max_consecutive_losses", 2))
-    dt_pause_min    = float(_DT.get("loss_streak_pause_minutes", 30))
+    dt_max_losses = int(_DT.get("max_consecutive_losses", 2))
+    dt_pause_min = float(_DT.get("loss_streak_pause_minutes", 30))
 
     # In daytrading mode, ATR dynamic TP still applies but with lower base
     if dt_enabled:
-        dt_tp_func = lambda prices: min(_MAX_TP_PCT, max(dt_tp_base, _ATR_TP_MULT * (
-            sum(abs(prices[i] - prices[i-1]) for i in range(-_ATR_PERIOD, 0)) / _ATR_PERIOD / prices[-1] * 100
-            if len(prices) >= _ATR_PERIOD + 1 else dt_tp_base
-        ))) if _ENABLE_ATR_TP else dt_tp_base
+        dt_tp_func = (
+            lambda prices: min(
+                _MAX_TP_PCT,
+                max(
+                    dt_tp_base,
+                    _ATR_TP_MULT
+                    * (
+                        sum(abs(prices[i] - prices[i - 1]) for i in range(-_ATR_PERIOD, 0))
+                        / _ATR_PERIOD
+                        / prices[-1]
+                        * 100
+                        if len(prices) >= _ATR_PERIOD + 1
+                        else dt_tp_base
+                    ),
+                ),
+            )
+            if _ENABLE_ATR_TP
+            else dt_tp_base
+        )
 
     effective_cooldown = dt_cooldown_sec if dt_enabled else _TRADE_COOLDOWN_SEC
     effective_max_losses = dt_max_losses if dt_enabled else 3
@@ -476,7 +515,11 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
             else:
                 pnl_pct = ((position.entry_price - px) / position.entry_price) * 100
 
-            tp = 1.2 if position.tag == "scalp" else (dt_tp_func(list(hist[p])) if dt_enabled else _atr_dynamic_tp(list(hist[p])))
+            tp = (
+                1.2
+                if position.tag == "scalp"
+                else (dt_tp_func(list(hist[p])) if dt_enabled else _atr_dynamic_tp(list(hist[p])))
+            )
             sl = -0.8 if position.tag == "scalp" else (dt_sl if dt_enabled else -3.0)
             max_hold_h = 6 if position.tag == "scalp" else (dt_max_hold_h if dt_enabled else 48)
 
@@ -509,7 +552,11 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
         if ts < pause_until:
             continue
 
-        cands = [(abs(score[p]), p) for p in PAIRS if signal[p] in ("BUY", "SELL") and pos[p].side == 0 and abs(score[p]) >= _MIN_BUY_SCORE]
+        cands = [
+            (abs(score[p]), p)
+            for p in PAIRS
+            if signal[p] in ("BUY", "SELL") and pos[p].side == 0 and abs(score[p]) >= _MIN_BUY_SCORE
+        ]
         if not cands:
             continue
         _, bp = max(cands)
@@ -549,14 +596,26 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
             continue
 
         # determine entry execution depending on execution_mode
-        if execution_mode == 'immediate':
+        if execution_mode == "immediate":
             slip = compute_slip_for_pair(list(hist.get(bp, [])), slippage_bps, slippage_model)
             entry_px = px * (1 + slip) if direction == 1 else px * (1 - slip)
             qty = allocation / entry_px if entry_px > 0 else 0.0
             total_fee = entry_px * qty * fee_rate
-        elif execution_mode in ('twap', 'vwap'):
+        elif execution_mode in ("twap", "vwap"):
             # simulate TWAP/VWAP over next n slabs
-            entry_px, qty, total_fee = simulate_twap_entry(bp, direction, allocation, idx, all_ts, series, hist, twap_slices, slippage_bps, slippage_model, fee_rate)
+            entry_px, qty, total_fee = simulate_twap_entry(
+                bp,
+                direction,
+                allocation,
+                idx,
+                all_ts,
+                series,
+                hist,
+                twap_slices,
+                slippage_bps,
+                slippage_model,
+                fee_rate,
+            )
         else:
             # fallback to immediate
             slip = compute_slip_for_pair(list(hist.get(bp, [])), slippage_bps, slippage_model)
@@ -578,7 +637,9 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
                 continue
             cash -= allocation
 
-        pos[bp] = Position(side=direction, qty=qty, entry_price=entry_px, entry_ts=ts, tag=("scalp" if is_scalp else "swing"))
+        pos[bp] = Position(
+            side=direction, qty=qty, entry_price=entry_px, entry_ts=ts, tag=("scalp" if is_scalp else "swing")
+        )
         last_trade_ts = ts
 
     # liquidate at end
@@ -617,7 +678,7 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
     eq_series = [v for (_ts, v) in equity_history]
     returns = []
     for i in range(1, len(eq_series)):
-        prev = eq_series[i-1]
+        prev = eq_series[i - 1]
         cur = eq_series[i]
         if prev > 0:
             returns.append((cur / prev) - 1.0)
@@ -625,8 +686,10 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
     annual_factor = (24.0 * 365.0) / period_hours
     mean_ret = float(np.mean(returns)) if returns else 0.0
     std_ret = float(np.std(returns, ddof=1)) if len(returns) > 1 else 0.0
-    sharpe = (mean_ret / std_ret) * (annual_factor ** 0.5) if std_ret > 0 else None
-    ann_return = ((cash / initial_eur) ** (annual_factor / max(1.0, len(eq_series)))) - 1.0 if len(eq_series) > 0 else 0.0
+    sharpe = (mean_ret / std_ret) * (annual_factor**0.5) if std_ret > 0 else None
+    ann_return = (
+        ((cash / initial_eur) ** (annual_factor / max(1.0, len(eq_series)))) - 1.0 if len(eq_series) > 0 else 0.0
+    )
     calmar = None
     if max_dd > 0:
         calmar = ann_return / (max_dd / 100.0) if max_dd > 0 else None
@@ -655,7 +718,7 @@ def run_backtest(days: int, initial_eur: float, fee_rate: float, slippage_bps: f
             ts, val = equity_history[i]
             if val < peak_val:
                 # find next time val >= peak_val
-                for j in range(i+1, len(equity_history)):
+                for j in range(i + 1, len(equity_history)):
                     ts2, val2 = equity_history[j]
                     if val2 >= peak_val:
                         recovery_seconds = ts2 - ts
@@ -705,14 +768,25 @@ def main() -> None:
     ap.add_argument("--initial", type=float, default=200.0)
     ap.add_argument("--fee", type=float, default=0.0026)
     ap.add_argument("--slippage-bps", type=float, default=8.0)
-    ap.add_argument("--execution-mode", choices=["immediate","twap","vwap"], default="immediate")
+    ap.add_argument("--execution-mode", choices=["immediate", "twap", "vwap"], default="immediate")
     ap.add_argument("--twap-slices", type=int, default=3)
-    ap.add_argument("--slippage-model", choices=["fixed","volatility"], default="fixed")
-    ap.add_argument("--daytrading", action="store_true", help="Enable daytrading mode (short holds, tight SL/TP, faster cooldowns)")
+    ap.add_argument("--slippage-model", choices=["fixed", "volatility"], default="fixed")
+    ap.add_argument(
+        "--daytrading", action="store_true", help="Enable daytrading mode (short holds, tight SL/TP, faster cooldowns)"
+    )
     ap.add_argument("--out", type=str, default="reports/v3_backtest_detailed.json")
     args = ap.parse_args()
 
-    result = run_backtest(args.days, args.initial, args.fee, args.slippage_bps, execution_mode=args.execution_mode, twap_slices=args.twap_slices, slippage_model=args.slippage_model, daytrading=args.daytrading)
+    result = run_backtest(
+        args.days,
+        args.initial,
+        args.fee,
+        args.slippage_bps,
+        execution_mode=args.execution_mode,
+        twap_slices=args.twap_slices,
+        slippage_model=args.slippage_model,
+        daytrading=args.daytrading,
+    )
     print(json.dumps(result, indent=2))
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
