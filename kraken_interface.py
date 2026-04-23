@@ -34,7 +34,16 @@ import logging
 import time
 import toml
 import os
+import json
+import random
+from pathlib import Path
 from order_lock import acquire_order_lock
+
+# Simple local cache for OHLC to reduce repeated API calls during large grid runs
+_CACHE_DIR = Path(__file__).parent / 'data' / 'cache' / 'kraken'
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# TTL for cached OHLC (seconds)
+CACHE_TTL_SECONDS = 24 * 3600
 
 
 class KrakenAPI:
@@ -53,29 +62,42 @@ class KrakenAPI:
 
     def _is_rate_limit_error(self, response):
         """Return True if the Kraken response indicates a rate-limit or lockout error."""
-        errs = response.get('error', [])
+        errs = response.get('error', []) if isinstance(response, dict) else []
         if isinstance(errs, str):
             errs = [errs]
-        return any(
-            'Rate limit' in str(e) or 'EAPI:Rate limit' in str(e) or 'EGeneral:Temporary lockout' in str(e)
-            for e in errs
-        )
+        for e in errs:
+            s = str(e).lower()
+            # common substrings indicating rate limiting / throttling
+            if any(sub in s for sub in ('rate limit', 'eapi:rate limit', 'egeneral:temporary lockout', 'too many requests', 'too many')):
+                return True
+        return False
 
     def _query_private_with_backoff(self, endpoint, params=None, retries=5):
-        """Query a private Kraken endpoint with exponential backoff on rate-limit/lockout errors."""
+        """Query a private Kraken endpoint with exponential backoff on rate-limit/lockout errors.
+
+        Uses randomized jitter and capped exponential delays to reduce synchronized retries
+        when many workers / grid runners operate concurrently.
+        """
         params = params or {}
         last_error = None
         for attempt in range(retries):
-            if attempt > 0:
-                delay = min(30.0, self.rate_limit_delay * (4 ** attempt))  # capped at 30s: 2s, 8s, 30s, 30s
+            if attempt == 0:
+                # small initial delay to avoid hammering
+                time.sleep(self.rate_limit_delay)
+            else:
+                base = 2 ** attempt
+                # add jitter between 0.8x and 1.2x
+                delay = min(30.0, base * random.uniform(0.8, 1.2))
                 self.logger.warning(
                     f"{endpoint} backing off {delay:.1f}s before attempt {attempt + 1}/{retries} …"
                 )
                 time.sleep(delay)
-            else:
-                time.sleep(self.rate_limit_delay)
             try:
                 response = self.api.query_private(endpoint, params)
+                if response is None:
+                    last_error = 'no response'
+                    self.logger.debug(f"{endpoint} returned no response (attempt {attempt + 1}/{retries})")
+                    continue
                 if self._is_rate_limit_error(response):
                     last_error = response.get('error')
                     self.logger.warning(f"{endpoint} rate-limited/locked out (attempt {attempt + 1}/{retries}): {last_error}")
@@ -83,30 +105,44 @@ class KrakenAPI:
                 return response
             except Exception as e:
                 self.logger.exception(f"Exception in private {endpoint} attempt {attempt + 1}: {e}")
-                return None
+                last_error = str(e)
+                # continue to retry rather than immediately returning
+                continue
         self.logger.error(f"{endpoint} failed after {retries} retries: {last_error}")
         return None
 
     def _query_public_with_backoff(self, endpoint, params=None, retries=4):
-        """Query a public Kraken endpoint with exponential backoff on rate-limit errors."""
+        """Query a public Kraken endpoint with exponential backoff on rate-limit errors.
+
+        Adds jitter to avoid thundering herd and retries transient exceptions.
+        """
         params = params or {}
         last_error = None
         for attempt in range(retries):
-            delay = self.rate_limit_delay * (2 ** attempt)
-            time.sleep(delay)
+            if attempt == 0:
+                time.sleep(self.rate_limit_delay)
+            else:
+                base = 2 ** attempt
+                delay = min(30.0, base * random.uniform(0.8, 1.2))
+                self.logger.debug(f"Public {endpoint} backing off {delay:.1f}s (attempt {attempt + 1}/{retries})")
+                time.sleep(delay)
             try:
                 response = self.api.query_public(endpoint, params)
+                if response is None:
+                    last_error = 'no response'
+                    self.logger.debug(f"{endpoint} returned no response (attempt {attempt + 1}/{retries})")
+                    continue
                 if self._is_rate_limit_error(response):
                     last_error = response.get('error')
                     self.logger.warning(
-                        f"{endpoint} rate-limited (attempt {attempt + 1}/{retries}), "
-                        f"backing off {delay:.1f}s …"
+                        f"{endpoint} rate-limited (attempt {attempt + 1}/{retries}), backing off …"
                     )
                     continue
                 return response
             except Exception as e:
                 self.logger.exception(f"Exception in {endpoint} attempt {attempt + 1}: {e}")
-                return None
+                last_error = str(e)
+                continue
         self.logger.error(f"{endpoint} failed after {retries} retries due to rate limit: {last_error}")
         return None
 
@@ -135,7 +171,7 @@ class KrakenAPI:
             return None
 
     def get_ohlc_data(self, pair, interval=60, since=None):
-        """Fetch OHLC data from Kraken.
+        """Fetch OHLC data from Kraken with local cache fallback on API failures.
         Intervals: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
         """
         try:
@@ -143,11 +179,44 @@ class KrakenAPI:
             if since:
                 params['since'] = since
             response = self._query_public_with_backoff('OHLC', params)
+
+            cache_path = _CACHE_DIR / f"{pair}_{interval}.json"
+
+            # If API failed, attempt to use cached data
             if response is None:
+                if cache_path.exists():
+                    age = time.time() - cache_path.stat().st_mtime
+                    if age <= CACHE_TTL_SECONDS:
+                        try:
+                            cached = json.loads(cache_path.read_text())
+                            self.logger.warning(f"Using cached OHLC for {pair} (age {int(age)}s) due to API failure")
+                            return cached
+                        except Exception:
+                            self.logger.debug(f"Failed to read OHLC cache for {pair}")
                 return None
+
             if self._handle_error(response, f"OHLC Data for {pair}"):
+                # try cache on error
+                if cache_path.exists():
+                    age = time.time() - cache_path.stat().st_mtime
+                    if age <= CACHE_TTL_SECONDS:
+                        try:
+                            cached = json.loads(cache_path.read_text())
+                            self.logger.warning(f"Using cached OHLC for {pair} (age {int(age)}s) due to API error")
+                            return cached
+                        except Exception:
+                            self.logger.debug(f"Failed to read OHLC cache for {pair}")
                 return None
-            return response.get('result', {})
+
+            result = response.get('result', {})
+            # store cache (best-effort)
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(json.dumps(result))
+            except Exception as e:
+                self.logger.debug(f"Failed to write OHLC cache for {pair}: {e}")
+
+            return result
         except Exception as e:
             self.logger.exception(f"Error fetching OHLC data for {pair}: {e}")
             return None
