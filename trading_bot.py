@@ -2050,47 +2050,63 @@ class TradingBot:
             print(f"\nTrading bot stopped. Final Balance: {final_balance:.2f} EUR")
 
     def _journal_trade(self, ttype, pair, volume, price, pnl_eur, reason, extra=None):
+        """Journal a trade: append CSV and JSONL entries with safety measures.
+
+        CSV write and JSONL append are independent to avoid single-point failures.
+        """
+        # CSV journaling (best-effort)
         try:
             import csv, os, datetime, json
             os.makedirs(os.path.dirname(self.journal_path), exist_ok=True)
-            header = ['ts','type','pair','volume','price','pnl_eur','reason','extra']
+            header = ['ts', 'type', 'pair', 'volume', 'price', 'pnl_eur', 'reason', 'extra']
             exists = os.path.exists(self.journal_path)
-            with open(self.journal_path,'a',newline='') as fh:
+            with open(self.journal_path, 'a', newline='') as fh:
                 writer = csv.writer(fh)
                 if not exists:
                     writer.writerow(header)
                 row = [datetime.datetime.utcnow().isoformat(), ttype, pair, f"{volume:.8f}", f"{price:.6f}", f"{pnl_eur:.6f}", reason, str(extra or '')]
                 writer.writerow(row)
-            # also write structured JSON line for observability
-            try:
-                os.makedirs(os.path.dirname(self.json_journal_path), exist_ok=True)
-                j = {
-                    'ts': datetime.datetime.utcnow().isoformat(),
-                    'type': ttype,
-                    'pair': pair,
-                    'volume': float(volume),
-                    'price': float(price),
-                    'pnl_eur': float(pnl_eur),
-                    'reason': reason,
-                    'extra': extra or {},
-                    'balance_eur': float(self.get_eur_balance()),
-                    'consecutive_losses': int(self.consecutive_losses),
-                }
-                # include current drawdown if available
-                try:
-                    peak = float(getattr(self, 'peak_balance', j['balance_eur']))
-                    if peak > 0:
-                        j['current_drawdown_pct'] = round(((peak - j['balance_eur']) / peak) * 100.0, 2)
-                except Exception:
-                    pass
-                try:
-                    ok = append_jsonl_locked(self.json_journal_path, j)
-                    if not ok:
-                        self.logger.error("Error writing JSON trade log: append_jsonl_locked returned False")
-                except Exception as e:
-                    self.logger.error(f"Error writing JSON trade log: {e}")
         except Exception as e:
-            self.logger.error(f"Error writing trade journal: {e}")
+            self.logger.error(f"Error writing trade journal CSV: {e}")
+
+        # JSONL structured journaling (use locked append helper with fallback)
+        try:
+            os.makedirs(os.path.dirname(self.json_journal_path), exist_ok=True)
+            j = {
+                'ts': datetime.datetime.utcnow().isoformat(),
+                'type': ttype,
+                'pair': pair,
+                'volume': float(volume),
+                'price': float(price),
+                'pnl_eur': float(pnl_eur),
+                'reason': reason,
+                'extra': extra or {},
+                'balance_eur': float(self.get_eur_balance()),
+                'consecutive_losses': int(self.consecutive_losses),
+            }
+            # include current drawdown if available
+            try:
+                peak = float(getattr(self, 'peak_balance', j['balance_eur']))
+                if peak > 0:
+                    j['current_drawdown_pct'] = round(((peak - j['balance_eur']) / peak) * 100.0, 2)
+            except Exception:
+                pass
+
+            ok = False
+            try:
+                ok = append_jsonl_locked(self.json_journal_path, j)
+            except Exception:
+                ok = False
+
+            if not ok:
+                # fallback: plain append (best-effort)
+                try:
+                    with open(self.json_journal_path, 'a', encoding='utf-8') as jf:
+                        jf.write(json.dumps(j) + "\n")
+                except Exception as e:
+                    self.logger.error(f"Error writing JSON trade log fallback: {e}")
+        except Exception as e:
+            self.logger.error(f"Error writing JSON trade log: {e}")
 
     def execute_buy_order(self, pair, price):
         """Place a post-only (maker) spot BUY order for *pair* at *price*.
