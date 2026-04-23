@@ -177,3 +177,126 @@ def validate_config(config):
         return False
 
     return True
+
+
+# ── Atomic write & JSONL helpers ──────────────────────────────────────────────
+import json, os, tempfile, fcntl
+
+
+def atomic_write_json(path: str, obj, mode: int = 0o600) -> bool:
+    """Atomically write a JSON object to a file (tmp -> rename) and fsync.
+
+    Ensures parent directory exists, writes to a uniquely-named temp file, fsyncs,
+    sets file permissions and then atomically replaces the target path.
+    Returns True on success.
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(path) + '.', dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(obj, f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp_path, mode)
+            os.replace(tmp_path, path)
+        finally:
+            # if tmp_path still exists, try to remove it
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
+def append_jsonl_locked(path: str, obj) -> bool:
+    """Append a JSON object as a single line to a JSONL file using an exclusive fcntl lock.
+
+    Creates parent dir if needed. Writes a compact JSON line with trailing newline,
+    flushes and fsyncs the file before releasing the lock. Returns True on success.
+    """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        line = json.dumps(obj, separators=(',', ':')) + "\n"
+        # Open for append and obtain an exclusive lock
+        with open(path, 'a+', encoding='utf-8') as f:
+            fd = f.fileno()
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                f.write(line)
+                f.flush()
+                os.fsync(fd)
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except Exception:
+                    pass
+        return True
+    except Exception:
+        return False
+
+
+def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_percent=0.0, fees_taker_percent=0.0):
+    """Compute the net percent profit of the last closed round-trip (BUY->SELL) for pair.
+
+    Reads the given JSONL file while holding a shared lock, finds the most recent
+    SELL and the preceding BUY for the same pair, computes gross percent and
+    subtracts estimated fees (maker+taker). Fees may be provided in percent-like
+    config values (pct_to_frac normalizes them).
+
+    Returns net percent (float) or None if no matching history is found.
+    """
+    try:
+        if not os.path.exists(jsonl_path):
+            return None
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            fd = f.fileno()
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH)
+            except Exception:
+                pass
+            try:
+                lines = f.read().splitlines()
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except Exception:
+                    pass
+        # scan from the end to find last SELL for this pair
+        for i in range(len(lines) - 1, -1, -1):
+            try:
+                j = json.loads(lines[i])
+            except Exception:
+                continue
+            if (j.get('pair') or '').upper() != (pair or '').upper():
+                continue
+            if j.get('type', '').upper() == 'SELL':
+                sell = j
+                # find the preceding BUY for the same pair
+                buy = None
+                for k in range(i - 1, -1, -1):
+                    try:
+                        b = json.loads(lines[k])
+                    except Exception:
+                        continue
+                    if (b.get('pair') or '').upper() == (pair or '').upper() and b.get('type', '').upper() == 'BUY':
+                        buy = b
+                        break
+                if not buy:
+                    return None
+                buy_price = float(buy.get('price', 0.0) or 0.0)
+                sell_price = float(sell.get('price', 0.0) or 0.0)
+                if buy_price <= 0:
+                    return None
+                gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
+                fees_total_frac = pct_to_frac(fees_maker_percent) + pct_to_frac(fees_taker_percent)
+                fees_total_pct = fees_total_frac * 100.0
+                net_pct = gross_pct - fees_total_pct
+                return net_pct
+        return None
+    except Exception:
+        return None
+

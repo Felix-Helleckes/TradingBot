@@ -74,7 +74,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from analysis import TechnicalAnalysis
-from utils import load_config, pct_to_frac, apply_trade_costs
+from utils import load_config, pct_to_frac, apply_trade_costs, append_jsonl_locked, last_closed_trade_net_profit_pct
 
 # Load .env if python-dotenv is available (graceful fallback otherwise)
 try:
@@ -1461,52 +1461,11 @@ class TradingBot:
     def _last_closed_trade_net_profit_pct(self, pair):
         """Return the net profit percent of the last closed (BUY->SELL) roundtrip for *pair*.
 
-        Algorithm: read structured JSONL trade log (self.json_journal_path), find the
-        most recent SELL for the pair and the preceding BUY for the same pair, then
-        compute gross percent = (sell_price - buy_price)/buy_price*100 and subtract
-        estimated fees (maker+taker) to produce a conservative net percent.
-
-        Returns float percent or None if no matching history found.
+        Delegates to utils.last_closed_trade_net_profit_pct which performs a
+        locked read of the JSONL journal and normalizes fee inputs consistently.
         """
         try:
-            if not os.path.exists(self.json_journal_path):
-                return None
-            with open(self.json_journal_path, 'r') as jf:
-                lines = jf.read().splitlines()
-            # scan from the end to find last SELL for this pair
-            for i in range(len(lines) - 1, -1, -1):
-                try:
-                    j = json.loads(lines[i])
-                except Exception:
-                    continue
-                if (j.get('pair') or '').upper() != (pair or '').upper():
-                    continue
-                if j.get('type', '').upper() == 'SELL':
-                    sell = j
-                    # find the preceding BUY for the same pair
-                    buy = None
-                    for k in range(i - 1, -1, -1):
-                        try:
-                            b = json.loads(lines[k])
-                        except Exception:
-                            continue
-                        if (b.get('pair') or '').upper() == (pair or '').upper() and b.get('type', '').upper() == 'BUY':
-                            buy = b
-                            break
-                    if not buy:
-                        return None
-                    buy_price = float(buy.get('price', 0.0) or 0.0)
-                    sell_price = float(sell.get('price', 0.0) or 0.0)
-                    if buy_price <= 0:
-                        return None
-                    gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
-                    # fees are stored in config as percent-like values (e.g. 0.16 meaning 0.16%).
-                    # Normalize to fractions and convert to percent for subtraction.
-                    fees_total_frac = pct_to_frac(getattr(self, 'fees_maker_percent', 0.0)) + pct_to_frac(getattr(self, 'fees_taker_percent', 0.0))
-                    fees_total_pct = fees_total_frac * 100.0
-                    net_pct = gross_pct - fees_total_pct
-                    return net_pct
-            return None
+            return last_closed_trade_net_profit_pct(self.json_journal_path, pair, self.fees_maker_percent, self.fees_taker_percent)
         except Exception:
             return None
 
@@ -2124,10 +2083,12 @@ class TradingBot:
                         j['current_drawdown_pct'] = round(((peak - j['balance_eur']) / peak) * 100.0, 2)
                 except Exception:
                     pass
-                with open(self.json_journal_path, 'a') as jf:
-                    jf.write(json.dumps(j) + "\n")
-            except Exception as e:
-                self.logger.error(f"Error writing JSON trade log: {e}")
+                try:
+                    ok = append_jsonl_locked(self.json_journal_path, j)
+                    if not ok:
+                        self.logger.error("Error writing JSON trade log: append_jsonl_locked returned False")
+                except Exception as e:
+                    self.logger.error(f"Error writing JSON trade log: {e}")
         except Exception as e:
             self.logger.error(f"Error writing trade journal: {e}")
 
