@@ -2347,9 +2347,22 @@ class Backtester:
 
         # Parameters
         pairs = self.config['bot_settings'].get('trade_pairs', ['XBTEUR'])
-        start_date = datetime(2024, 1, 1)
-        interval = 60
-        initial_balance = 1000.0
+        # backtesting start date: default to 2024-01-01 but allow override via config.backtesting.start_date = 'YYYY-MM-DD'
+        bcfg = self.config.get('backtesting', {}) if isinstance(self.config, dict) else {}
+        sd = bcfg.get('start_date')
+        if sd:
+            try:
+                # support ISO date strings
+                start_date = datetime.fromisoformat(str(sd))
+            except Exception:
+                try:
+                    start_date = datetime.strptime(str(sd), '%Y-%m-%d')
+                except Exception:
+                    start_date = datetime(2024, 1, 1)
+        else:
+            start_date = datetime(2024, 1, 1)
+        interval = int(bcfg.get('interval', 60))
+        initial_balance = float(bcfg.get('initial_balance', 1000.0))
 
         # Fees / guard configuration
         rm = self.config.get('risk_management', {})
