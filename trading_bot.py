@@ -1281,8 +1281,27 @@ class TradingBot:
             return True  # fail open — don't block trades on API errors
 
     def _is_temporarily_paused(self):
-        """Return True while the bot is in a loss-streak or drawdown cooldown period."""
-        return time.time() < self.trading_paused_until_ts
+        """Return True while the bot is in a loss-streak or drawdown cooldown period.
+
+        Additionally, a manual kill-switch file (self.kill_switch_path) pauses buys
+        when present. This allows an operator to quickly disable new entries by
+        creating the PAUSE file in the project directory.
+        """
+        try:
+            # Manual kill-switch: presence of PAUSE file disables buys immediately
+            if getattr(self, 'kill_switch_path', None) and os.path.exists(self.kill_switch_path):
+                try:
+                    self.logger.info("Manual PAUSE file detected; buys are paused until file is removed.")
+                except Exception:
+                    pass
+                return True
+        except Exception as e:
+            # Non-fatal; if check fails, fall back to time-based pause only
+            try:
+                self.logger.debug(f"Could not check kill switch file: {e}")
+            except Exception:
+                pass
+        return time.time() < getattr(self, 'trading_paused_until_ts', 0)
 
     def _available_eur_for_buy(self):
         """Return spendable EUR after reserving 1.5 % for fees and slippage."""
@@ -2368,23 +2387,10 @@ class Backtester:
         rm = self.config.get('risk_management', {})
         # Support fees expressed either as percentage (e.g. 0.26 for 0.26%)
         # or as decimal fraction (e.g. 0.0026). Normalize to fraction (0.0026).
-        def _pct_to_frac(v):
-            try:
-                f = float(v)
-            except Exception:
-                return 0.0
-            if f > 1:
-                # value looks like '26' -> treat as percent
-                return f / 100.0
-            if 0.01 <= f <= 1.0:
-                # value looks like '0.26' -> percent expressed as 0.26 (0.26%)
-                return f / 100.0
-            # otherwise already fraction (e.g. 0.0026)
-            return f
-
-        fees_maker_frac = _pct_to_frac(rm.get('fees_maker_percent', 0.16))
-        fees_taker_frac = _pct_to_frac(rm.get('fees_taker_percent', 0.26))
-        exit_slippage_frac = _pct_to_frac(rm.get('exit_slippage_buffer_pct', 0.35))
+        # normalize fee/slippage values using shared utility
+        fees_maker_frac = pct_to_frac(rm.get('fees_maker_percent', 0.16))
+        fees_taker_frac = pct_to_frac(rm.get('fees_taker_percent', 0.26))
+        exit_slippage_frac = pct_to_frac(rm.get('exit_slippage_buffer_pct', 0.35))
         min_net_sell = float(rm.get('min_net_sell_profit_pct', 0.0))
         min_reentry = float(rm.get('min_reentry_profit_pct', 0.0))
         reentry_pairs = [p.upper() for p in rm.get('reentry_guard_pairs', ['VER'])]
