@@ -48,12 +48,9 @@ cp .env.example .env
 ```
 > Create a Kraken API key with **Trade** permissions only. Never enable withdrawals.
 
-**3. (Optional) Set up Telegram notifications**
-```bash
-# Add to .env:
-TELEGRAM_TOKEN=your_bot_token   # from @BotFather
-TELEGRAM_CHAT_ID=your_chat_id  # run: python3 scripts/setup_telegram.py
-```
+**3. Notifications**
+
+Telegram notifications were previously supported, but notifications are now disabled by default in this repository. The `core/notifier.py` module is a no-op to prevent outbound messages. If you want to re-enable notifications, restore `core/notifier.py` and add `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` to your `.env`.
 
 **4. Configure the bot**
 
@@ -88,7 +85,7 @@ sudo journalctl -u kraken-bot -f
 | `kraken_interface.py` | Kraken API wrapper |
 | `config.toml` | All settings — pairs, risk, filters, sizing |
 | `utils.py` | Config loading and validation |
-| `core/notifier.py` | Telegram notification helper |
+| `core/notifier.py` | Notifier helper (disabled by default; no-op) |
 | `kraken-bot.service` | systemd unit file for 24/7 Pi operation |
 | `scripts/` | Backtesting, data collection, ops tools |
 
@@ -258,7 +255,7 @@ All settings live in `config.toml`.  The most important ones:
 
 | Script | Purpose |
 |---|---|
-| `setup_telegram.py` | **One-time setup** — finds your Telegram chat ID |
+| `setup_telegram.py` | **One-time setup** — finds your Telegram chat ID (unused while notifier is disabled) |
 | `monitor_bot.sh` | **Watchdog** — legacy cron fallback (systemd preferred) |
 | `rotate_logs.sh` | **Log rotation** — manual fallback (systemd RotatingFileHandler is primary) |
 | `weekly_report.py` | **Weekly report** — reads NAS trade history, outputs P&L/win-rate summary |
