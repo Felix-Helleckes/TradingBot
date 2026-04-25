@@ -48,11 +48,14 @@ CACHE_TTL_SECONDS = 24 * 3600
 
 class KrakenAPI:
     """Wrapper for Kraken API interactions."""
-
-    def __init__(self, api_key, api_secret):
+    def __init__(self, api_key, api_secret, paper_mode: bool = False):
+        """If `paper_mode` is True, orders are simulated locally and no
+        live AddOrder requests are sent. Useful for dry‑run diagnostics.
+        """
         self.api = krakenex.API(api_key, api_secret)
         self.logger = logging.getLogger(__name__)
         self.rate_limit_delay = 0.5  # seconds between API calls
+        self.paper_mode = bool(paper_mode)
 
     def _handle_error(self, response, action):
         if response.get('error'):
@@ -168,6 +171,19 @@ class KrakenAPI:
             return response.get('result', {})
         except Exception as e:
             self.logger.exception(f"Error fetching market data for {pair}: {e}")
+            return None
+
+    def get_order_book(self, pair, count: int = 5):
+        """Fetch order book depth (best bids/asks). Returns Kraken Depth result or None."""
+        try:
+            resp = self._query_public_with_backoff('Depth', {'pair': pair, 'count': count})
+            if resp is None:
+                return None
+            if self._handle_error(resp, f"Orderbook for {pair}"):
+                return None
+            return resp.get('result', {})
+        except Exception as e:
+            self.logger.exception(f"Error fetching order book for {pair}: {e}")
             return None
 
     def get_ohlc_data(self, pair, interval=60, since=None):
@@ -472,6 +488,32 @@ class KrakenAPI:
                 
             if leverage:
                 order_params['leverage'] = str(leverage)
+
+            # Paper mode: simulate an immediate fill at mid market price
+            if self.paper_mode:
+                try:
+                    ob = self.get_order_book(pair, count=3) or {}
+                    key = next(iter(ob.keys())) if ob else None
+                    if key:
+                        bids = ob[key].get('bids', [])
+                        asks = ob[key].get('asks', [])
+                        best_bid = float(bids[0][0]) if bids else None
+                        best_ask = float(asks[0][0]) if asks else None
+                        if best_bid and best_ask:
+                            mid = (best_bid + best_ask) / 2.0
+                        else:
+                            mid = None
+                    else:
+                        mid = None
+                except Exception:
+                    mid = None
+
+                txid = f"PAPER-{int(time.time()*1000)}"
+                res = {'txid': [txid], 'simulated': True}
+                if mid:
+                    res['fill_price'] = mid
+                self.logger.info(f"[PAPER] Simulated order: {direction} {volume} {pair} @ {res.get('fill_price')} ({order_type})")
+                return res
 
             with acquire_order_lock(timeout_seconds=5.0) as locked:
                 if not locked:

@@ -1,7 +1,6 @@
 # Trading Bot Core Logic - Multi-Pair Analysis
 """
 Kraken Trading Bot — Core Engine
-=================================
 This module is the heart of the trading bot.  It contains the ``TradingBot``
 class that orchestrates the full trading lifecycle, plus a minimal ``Backtester``
 helper for offline strategy validation.
@@ -9,10 +8,26 @@ helper for offline strategy validation.
 Signal flow (high level)
 ------------------------
 ::
-
+                    'extra': extra or {},
     price_action.py  (bar-pattern helpers — optional context)
          │
     analysis.py  TechnicalAnalysis.generate_signal_with_score()
+                # If caller provided expected/fill price, compute slippage
+                try:
+                    expected = None
+                    fill = None
+                    if extra and isinstance(extra, dict):
+                        expected = extra.get('expected_price')
+                        fill = extra.get('fill_price')
+                    if expected is not None and fill is not None:
+                        try:
+                            expected = float(expected)
+                            fill = float(fill)
+                            j['expected_price'] = expected
+                            j['fill_price'] = fill
+                            j['slippage_pct'] = round(((fill - expected) / expected) * 100.0, 4)
+                        except Exception:
+                            pass
          │         ↳ RSI mean-reversion  (enable_mr_signals)
          │         ↳ Bollinger-Band breakout (enable_trend_signals)
          │         returns (signal: str, score: float  [-50 … +50])
@@ -513,7 +528,7 @@ class TradingBot:
         try:
             ohlc = self.api_client.get_ohlc_data(pair, interval=60) # 1h
             if not ohlc:
-                return True # Fallback to allow trade if API fails
+                return False # Fail-closed: block trade if we cannot verify trend
             
             data_key = list(ohlc.keys())[0]
             # Kraken returns [time, open, high, low, close, vwap, volume, count]
@@ -522,7 +537,7 @@ class TradingBot:
             return self.analysis_tool.check_mtf_trend(closes)
         except Exception as e:
             self.logger.error(f"MTF check failed for {pair}: {e}")
-            return True
+            return False
 
     def _get_min_volume(self, pair):
         try:
@@ -1257,13 +1272,13 @@ class TradingBot:
 
             ohlc = self.api_client.get_ohlc_data(pair, interval=15)
             if not ohlc:
-                return True
+                return False
             data_key = next((k for k in ohlc if k != 'last'), None)
             if not data_key:
-                return True
+                return False
             rows = ohlc[data_key]
             if len(rows) < 3:
-                return True
+                return False
             volumes = [float(row[6]) for row in rows]
             window = volumes[-20:] if len(volumes) >= 20 else volumes
             avg_vol = sum(window) / len(window)
@@ -1278,7 +1293,7 @@ class TradingBot:
             return True
         except Exception as e:
             self.logger.warning(f"Volume check failed for {pair}: {e}")
-            return True  # fail open — don't block trades on API errors
+            return False  # fail-closed: block trades when we cannot verify volume
 
     def _is_temporarily_paused(self):
         """Return True while the bot is in a loss-streak or drawdown cooldown period.
@@ -2156,6 +2171,44 @@ class TradingBot:
             volume = self._calculate_volume(pair, price, available_eur=planned_eur)
             self.logger.info(f"Placing BUY order (MAKER/POST-ONLY): {volume:.6f} {pair} at {price:.2f} EUR")
 
+            # --- Preflight: spread and depth checks (fail-closed) ---
+            try:
+                exec_cfg = self.config.get('execution', {}) if isinstance(self.config, dict) else {}
+                max_spread_pct = float(exec_cfg.get('max_spread_pct', 0.5))
+                min_book_fill_ratio = float(exec_cfg.get('min_book_fill_ratio', 0.5))
+                ob = self.api_client.get_order_book(pair, count=3)
+                if not ob:
+                    self.logger.warning(f"BUY skipped for {pair}: orderbook unavailable (fail-closed)")
+                    return
+                data_key = next((k for k in ob if k != 'last'), None)
+                if not data_key:
+                    self.logger.warning(f"BUY skipped for {pair}: orderbook empty (fail-closed)")
+                    return
+                asks = ob[data_key].get('asks', [])
+                bids = ob[data_key].get('bids', [])
+                if not asks or not bids:
+                    self.logger.warning(f"BUY skipped for {pair}: insufficient orderbook depth (fail-closed)")
+                    return
+                best_ask = float(asks[0][0])
+                best_ask_vol = float(asks[0][1])
+                best_bid = float(bids[0][0])
+                mid = (best_ask + best_bid) / 2.0 if best_bid and best_ask else None
+                if mid is None:
+                    self.logger.warning(f"BUY skipped for {pair}: cannot compute midprice (fail-closed)")
+                    return
+                spread_pct = ((best_ask - best_bid) / mid) * 100.0
+                planned_notional = planned_eur
+                if spread_pct > max_spread_pct:
+                    self.logger.info(f"BUY skipped for {pair}: spread too wide ({spread_pct:.2f}% > {max_spread_pct}%)")
+                    return
+                # ensure top ask size in EUR is sufficient for at least a fraction of planned trade
+                if (best_ask * best_ask_vol) < (planned_notional * min_book_fill_ratio):
+                    self.logger.info(f"BUY skipped for {pair}: top ask depth insufficient for planned size ({best_ask*best_ask_vol:.2f} EUR < {planned_notional*min_book_fill_ratio:.2f} EUR)")
+                    return
+            except Exception as e:
+                self.logger.warning(f"Preflight checks failed for BUY {pair}: {e}")
+                return
+
             result = self._place_live_order(pair=pair, direction='buy', volume=volume, price=price, post_only=True)
             if result:
                 self.trade_count += 1
@@ -2177,7 +2230,16 @@ class TradingBot:
                         self.stop_info[pair] = {'stop_price': init_stop, 'type': 'ATR'}
                         self.logger.info(f"Initialized ATR stop for {pair}: {init_stop:.4f} (atr={atr:.4f})")
                 # journal buy
-                self._journal_trade('BUY', pair, volume, price, 0.0, 'BUY_EXECUTED', extra={'result': result})
+                # attempt to capture fill price (paper mode provides 'fill_price')
+                fill_price = None
+                try:
+                    if isinstance(result, dict) and 'fill_price' in result:
+                        fill_price = float(result.get('fill_price'))
+                    elif isinstance(result, dict) and result.get('simulated'):
+                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
+                except Exception:
+                    fill_price = None
+                self._journal_trade('BUY', pair, volume, price, 0.0, 'BUY_EXECUTED', extra={'result': result, 'expected_price': price, 'fill_price': fill_price})
                 print(f"\n[BUY] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 _notifier.send(
                     f"🟢 <b>BUY</b> #{self.trade_count}\n"
@@ -2251,7 +2313,16 @@ class TradingBot:
                     f"SELL PNL ESTIMATE {pair}: {est_profit_eur:.2f} EUR ({est_profit_pct if est_profit_pct is not None else 0:.2f}%)"
                 )
                 self._update_trade_metrics(pair, est_profit_eur)
-                self._journal_trade('SELL', pair, volume, price, est_profit_eur, reason or 'SELL_EXECUTED')
+                # attempt to capture fill price
+                fill_price = None
+                try:
+                    if isinstance(result, dict) and 'fill_price' in result:
+                        fill_price = float(result.get('fill_price'))
+                    elif isinstance(result, dict) and result.get('simulated'):
+                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
+                except Exception:
+                    fill_price = None
+                self._journal_trade('SELL', pair, volume, price, est_profit_eur, reason or 'SELL_EXECUTED', extra={'result': result, 'expected_price': price, 'fill_price': fill_price})
                 print(f"\n[SELL] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 pnl_sign = "🟢" if est_profit_eur >= 0 else "🔴"
                 _notifier.send(

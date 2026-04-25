@@ -99,8 +99,9 @@ if not api_key or not api_secret:
     logger.warning("API credentials not configured. Set KRAKEN_API_KEY and KRAKEN_API_SECRET.")
     print("WARNING: Kraken API credentials are not configured.")
 
-kraken = KrakenAPI(api_key=api_key, api_secret=api_secret)
-trading_bot = TradingBot(kraken, config)
+# Defer KrakenAPI and TradingBot instantiation until CLI args are parsed
+kraken = None
+trading_bot = None
 
 if __name__ == "__main__":
     import argparse
@@ -108,13 +109,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kraken Automated Trading Bot")
     parser.add_argument("--backtest", action="store_true", help="Run backtesting mode.")
     parser.add_argument("--test", action="store_true", help="Run test mode (check API connection).")
+    parser.add_argument("--paper", action="store_true", help="Run in paper/dry-run mode (no live orders).")
     args = parser.parse_args()
+
+    # Instantiate Kraken client with optional paper/dry-run mode
+    kraken = KrakenAPI(api_key=api_key, api_secret=api_secret, paper_mode=args.paper)
+    trading_bot = TradingBot(kraken, config)
 
     if args.test:
         logger.info("Running test mode...")
         print("Testing Kraken API connection...")
         balance = kraken.get_account_balance()
-        if balance is not None:
+        if balance is not None: 
             print("[OK] Successfully connected to Kraken API")
             print(f"Account balance: {balance}")
         else:
@@ -125,6 +131,6 @@ if __name__ == "__main__":
         backtester = Backtester(kraken, config)
         backtester.run()
     else:
-        logger.info("Starting live trading...")
+        logger.info("Starting live trading...") 
         print("Starting Kraken Trading Bot...")
         trading_bot.start_trading()
