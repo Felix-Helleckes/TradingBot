@@ -59,6 +59,9 @@ class KrakenAPI:
         self.logger = logging.getLogger(__name__)
         self.rate_limit_delay = 0.5  # seconds between API calls
         self.paper_mode = bool(paper_mode)
+        # Simple in-memory cache for public endpoints to reduce API calls
+        self._public_cache = {}
+        self._public_cache_ttl = 60.0
         # Simple single-threaded rate limiter: ensure at least `rate_limit_delay`
         # seconds between API calls from this instance. This prevents local
         # thundering-herd behaviour when many parts of the code call the API.
@@ -141,6 +144,14 @@ class KrakenAPI:
         Adds jitter to avoid thundering herd and retries transient exceptions.
         """
         params = params or {}
+        # in-memory cache key
+        try:
+            cache_key = endpoint + '|' + json.dumps(params, sort_keys=True)
+            cached = self._public_cache.get(cache_key)
+            if cached and (time.time() - cached['ts']) <= self._public_cache_ttl:
+                return cached['resp']
+        except Exception:
+            cache_key = None
         last_error = None
         for attempt in range(retries):
             if attempt == 0:
@@ -152,21 +163,30 @@ class KrakenAPI:
                 time.sleep(delay)
             try:
                 response = self.api.query_public(endpoint, params)
-                if response is None:
-                    last_error = 'no response'
-                    self.logger.debug(f"{endpoint} returned no response (attempt {attempt + 1}/{retries})")
-                    continue
-                if self._is_rate_limit_error(response):
-                    last_error = response.get('error')
-                    self.logger.warning(
-                        f"{endpoint} rate-limited (attempt {attempt + 1}/{retries}), backing off …"
-                    )
-                    continue
-                return response
             except Exception as e:
                 self.logger.exception(f"Exception in {endpoint} attempt {attempt + 1}: {e}")
                 last_error = str(e)
                 continue
+
+            if response is None:
+                last_error = 'no response'
+                self.logger.debug(f"{endpoint} returned no response (attempt {attempt + 1}/{retries})")
+                continue
+            if self._is_rate_limit_error(response):
+                last_error = response.get('error')
+                self.logger.warning(
+                    f"{endpoint} rate-limited (attempt {attempt + 1}/{retries}), backing off …"
+                )
+                continue
+
+            # store in cache on success
+            try:
+                if cache_key and response is not None:
+                    self._public_cache[cache_key] = {'ts': time.time(), 'resp': response}
+            except Exception:
+                pass
+
+            return response
         self.logger.error(f"{endpoint} failed after {retries} retries due to rate limit: {last_error}")
         return None
 
@@ -510,6 +530,39 @@ class KrakenAPI:
                 
             if leverage:
                 order_params['leverage'] = str(leverage)
+
+            # Staggered limit ladder for large notional orders (simple execution hardening)
+            try:
+                ladder_threshold = float(risk_cfg.get('ladder_threshold_eur', 250.0))
+                ladder_chunks = int(risk_cfg.get('ladder_chunks', 4))
+                ladder_pause = float(risk_cfg.get('ladder_pause_seconds', 0.8))
+            except Exception:
+                ladder_threshold = 250.0
+                ladder_chunks = 4
+                ladder_pause = 0.8
+
+            if not self.paper_mode and desired_notional and desired_notional >= ladder_threshold and ladder_chunks > 1 and not reduce_only:
+                # split into chunks to reduce immediate market impact
+                try:
+                    chunk_volume = float(volume) / float(ladder_chunks)
+                    results = []
+                    for i in range(ladder_chunks):
+                        # small sleep/pause between chunks
+                        time.sleep(ladder_pause)
+                        # attempt to place chunk (respecting post_only/price)
+                        with acquire_order_lock(timeout_seconds=5.0) as locked:
+                            if not locked:
+                                self.logger.warning('Order lock busy during ladder; aborting remaining chunks')
+                                break
+                            order_params['volume'] = str(chunk_volume)
+                            resp = self.api.query_private('AddOrder', order_params)
+                        if resp is None or self._handle_error(resp, f"Ladder AddOrder chunk {i+1}"):
+                            self.logger.warning(f"Ladder chunk {i+1} failed or rate-limited")
+                            break
+                        results.append(resp.get('result', {}))
+                    return {'txid': [r.get('txid') for r in results if isinstance(r, dict) and r.get('txid')], 'chunked': True, 'result_chunks': results}
+                except Exception as e:
+                    self.logger.debug(f"Ladder execution failed: {e}")
 
             # Paper mode: simulate an immediate fill at mid market price
             if self.paper_mode:

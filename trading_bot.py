@@ -215,6 +215,11 @@ class TradingBot:
         # ATR dynamic take-profit: TP floor = atr_tp_multiplier × ATR%
         self.enable_atr_dynamic_tp = bool(self.config.get('risk_management', {}).get('enable_atr_dynamic_tp', False))
         self.atr_tp_multiplier = float(self.config.get('risk_management', {}).get('atr_tp_multiplier', 2.0))
+        # Signal refresh and regime cache (reduce API calls)
+        self.signal_refresh_interval = int(self.config.get('execution', {}).get('signal_refresh_interval_seconds', 300))
+        self._last_signal_refresh_ts = 0
+        self._regime_cache_ttl = int(self.config.get('execution', {}).get('regime_cache_ttl_seconds', 300))
+        self._regime_cache = {'ts': 0, 'risk_on': True}
         
         # Break-even stop-loss
         self.enable_break_even = bool(self.config.get('risk_management', {}).get('enable_break_even', True))
@@ -502,6 +507,12 @@ class TradingBot:
         # 1. Start with percentage-based sizing
         allocation_pct = float(self.config.get('risk_management', {}).get('allocation_per_trade_percent', 10.0))
         amount = available_eur * (allocation_pct / 100.0)
+
+        # small-account override: for tiny accounts prefer a fixed trade amount
+        small_account_floor = float(self.config.get('risk_management', {}).get('small_account_fixed_trade_eur', 25.0))
+        small_account_threshold = float(self.config.get('risk_management', {}).get('small_account_threshold_eur', 200.0))
+        if available_eur <= small_account_threshold:
+            amount = min(amount, small_account_floor)
         
         # 2. ATR adjustment (Vol Targeting)
         # We target a specific % movement per trade.
@@ -509,12 +520,12 @@ class TradingBot:
         current_price = self.pair_prices.get(pair, 0)
         
         if atr and current_price > 0:
-            # How many units to buy so that 1 ATR movement = X% of trade
-            # Normalizing factor: higher volatility -> lower amount
+            # Volatility scaling: target a notional such that 1 ATR move equals target_vol_pct of trade
             volatility_ratio = (atr / current_price) * 100.0
-            # Reference: 1.5% ATR is "normal". If vol is 3%, we halve the size.
-            target_vol = 1.5 
-            vol_multiplier = target_vol / max(0.5, volatility_ratio)
+            target_vol_pct = float(self.config.get('risk_management', {}).get('target_volatility_pct', 1.6))
+            # multiplier proportional to target_vol_pct / observed_vol (clamped)
+            vol_multiplier = (target_vol_pct / max(0.1, volatility_ratio))
+            vol_multiplier = max(0.3, min(3.0, vol_multiplier))
             amount *= vol_multiplier
 
         # 3. Apply risk-off multiplier from regime
@@ -526,14 +537,23 @@ class TradingBot:
     def _is_mtf_trend_bullish(self, pair):
         """Check 1h timeframe to confirm bullish trend."""
         try:
+            # Use cached regime data if fresh to avoid extra API calls
+            now = time.time()
+            if (now - self._regime_cache.get('ts', 0)) <= self._regime_cache_ttl:
+                # rely on cached pair history for MTF check
+                returns = self.analysis_tool.pair_price_history.get(pair)
+                if returns:
+                    closes = list(returns)
+                    return self.analysis_tool.check_mtf_trend(closes)
+
             ohlc = self.api_client.get_ohlc_data(pair, interval=60) # 1h
             if not ohlc:
                 return False # Fail-closed: block trade if we cannot verify trend
-            
-            data_key = list(ohlc.keys())[0]
+            data_key = next((k for k in ohlc if k != 'last'), None)
+            if not data_key:
+                return False
             # Kraken returns [time, open, high, low, close, vwap, volume, count]
             closes = [float(row[4]) for row in ohlc[data_key]]
-            
             return self.analysis_tool.check_mtf_trend(closes)
         except Exception as e:
             self.logger.error(f"MTF check failed for {pair}: {e}")
@@ -1509,16 +1529,41 @@ class TradingBot:
         """
         try:
             p = period if period is not None else self.atr_period
-            history = list(self.analysis_tool.pair_price_history.get(pair, []))
-            if not history or len(history) < 2:
+            # Prefer computing ATR from 1h OHLC when available (more robust than tick diffs)
+            try:
+                ohlc = self.api_client.get_ohlc_data(pair, interval=60)
+                if ohlc:
+                    data_key = next((k for k in ohlc if k != 'last'), None)
+                    if data_key:
+                        series = ohlc[data_key]
+                        if len(series) >= p + 1:
+                            trs = []
+                            prev_close = float(series[0][4])
+                            for row in series[-(p+1):]:
+                                high = float(row[2])
+                                low = float(row[3])
+                                close = float(row[4])
+                                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                                trs.append(tr)
+                                prev_close = close
+                            if trs:
+                                return float(sum(trs[-p:]) / len(trs[-p:]))
+            except Exception:
+                pass
+
+            # Fallback: compute ATR from internal price history close diffs
+            try:
+                import numpy as _np
+                history = list(self.analysis_tool.pair_price_history.get(pair, []))
+                if not history or len(history) < 2:
+                    return None
+                prices = _np.array(history)
+                tr = _np.abs(_np.diff(prices))
+                if len(tr) < p:
+                    return float(_np.mean(tr)) if len(tr) > 0 else None
+                return float(_np.mean(tr[-p:]))
+            except Exception:
                 return None
-            import numpy as _np
-            prices = _np.array(history)
-            # true range fallback: abs(diff of closes)
-            tr = _np.abs(_np.diff(prices))
-            if len(tr) < p:
-                return float(_np.mean(tr)) if len(tr) > 0 else None
-            return float(_np.mean(tr[-p:]))
         except Exception:
             return None
 
@@ -1746,6 +1791,67 @@ class TradingBot:
         except Exception as e:
             self.logger.warning(f"OHLC warmup failed for {pair}: {e}")
 
+    def _refresh_hourly_signals(self):
+        """Refresh signals using 1h OHLC candles for all configured pairs.
+        This reduces noise from tick-by-tick signals and centralizes signal
+        computation on a slower timeframe.
+        """
+        for pair in self.trade_pairs:
+            try:
+                ohlc = self.api_client.get_ohlc_data(pair, interval=60)
+                if not ohlc:
+                    continue
+                data_key = next((k for k in ohlc if k != 'last'), None)
+                if not data_key:
+                    continue
+                series = ohlc[data_key]
+                if not series:
+                    continue
+                last_close = float(series[-1][4])
+                market_data = {pair: {'c': [last_close]}}
+                signal, score = self.analysis_tool.generate_signal_with_score(market_data)
+                self.pair_signals[pair] = signal
+                self.pair_scores[pair] = score
+                time.sleep(0.2)
+            except Exception as e:
+                self.logger.debug(f"Hourly signal refresh error for {pair}: {e}")
+
+    def _update_regime_cache(self):
+        """Update regime cache (risk_on flag) using benchmark pair and mtf scoring."""
+        try:
+            now = time.time()
+            bench = self.regime_benchmark_pair
+            # try compute mtf score from history or by fetching 1h OHLC
+            mtf = self._compute_mtf_regime_score()
+            if mtf is None:
+                # seed history from 1h OHLC if needed
+                try:
+                    ohlc = self.api_client.get_ohlc_data(bench, interval=60)
+                    if ohlc:
+                        data_key = next((k for k in ohlc if k != 'last'), None)
+                        if data_key:
+                            closes = [float(r[4]) for r in ohlc[data_key]]
+                            for c in closes[-self.analysis_tool.max_history:]:
+                                self.analysis_tool._get_price_history(bench).append(c)
+                            mtf = self._compute_mtf_regime_score()
+                except Exception:
+                    pass
+
+            risk_on = True
+            if mtf is not None:
+                risk_on = mtf >= self.mtf_regime_min_score
+            else:
+                # fallback to pair_scores benchmark
+                try:
+                    score = float(self.pair_scores.get(bench, 0.0))
+                    risk_on = score >= self.regime_min_score
+                except Exception:
+                    risk_on = True
+
+            self._regime_cache = {'ts': now, 'risk_on': bool(risk_on)}
+        except Exception:
+            pass
+
     def analyze_all_pairs(self):
         """Fetch live prices, generate signals, and pick the best actionable pair.
 
@@ -1763,16 +1869,24 @@ class TradingBot:
         best_pair = None
         best_signal = "HOLD"
         best_score = 0
+        # Refresh hourly signals at configured interval to reduce noisy tick signals
+        try:
+            now = time.time()
+            if (now - self._last_signal_refresh_ts) >= self.signal_refresh_interval:
+                self._refresh_hourly_signals()
+                self._last_signal_refresh_ts = now
+        except Exception:
+            pass
 
         for pair in self.trade_pairs:
             try:
                 market_data = self.api_client.get_market_data(pair)
-                if not market_data:
-                    continue
-
-                pair_key = list(market_data.keys())[0]
-                current_price = float(market_data[pair_key]['c'][0])
-                self.pair_prices[pair] = current_price
+                if market_data:
+                    pair_key = list(market_data.keys())[0]
+                    current_price = float(market_data[pair_key]['c'][0])
+                    self.pair_prices[pair] = current_price
+                else:
+                    current_price = self.pair_prices.get(pair, 0)
 
                 # Seed history from NAS/API OHLC if buffer isn't full yet
                 if len(self.analysis_tool._get_price_history(pair_key)) < self.analysis_tool.max_history:
@@ -1785,9 +1899,10 @@ class TradingBot:
                     if self.holdings.get(pair, 0) >= self._get_min_volume(pair):
                         self.execute_sell_order(pair, current_price, require_profit_target=False, reason="CRASH_AIRBAG")
 
-                signal, score = self.analysis_tool.generate_signal_with_score(market_data)
-                self.pair_signals[pair] = signal
-                self.pair_scores[pair] = score
+                # Use cached hourly signals (refreshed periodically) when present
+                sig = self.pair_signals.get(pair)
+                score = self.pair_scores.get(pair, 0)
+                signal = sig if sig is not None else "HOLD"
 
                 if signal in ["BUY", "SELL"] and abs(score) > abs(best_score):
                     best_pair = pair
@@ -1993,31 +2108,51 @@ class TradingBot:
                         price = self.pair_prices.get(best_pair, 0)
                         if best_signal == "BUY":
                             score = float(self.pair_scores.get(best_pair, 0.0))
+                            # Cheap checks first
                             if self._is_temporarily_paused():
                                 self.logger.warning("BUY paused: loss-streak cooling period active")
                                 self.kelly_fraction = self._calculate_kelly_fraction()
-                            elif self._daily_drawdown_hit():
+                                continue
+                            if self._daily_drawdown_hit():
                                 self.logger.warning("BUY paused: daily loss limit reached")
                                 self.kelly_fraction = self._calculate_kelly_fraction()
-                            elif self._bear_mode_active:
-                                self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
-                            elif self.enable_regime_filter and not self._is_risk_on_regime():
-                                self.logger.info("BUY skipped: regime filter is RISK_OFF")
-                            elif score < self.min_buy_score:
+                                continue
+                            if score < self.min_buy_score:
                                 self.logger.info(f"BUY skipped for {best_pair}: weak score {score:.2f} < min {self.min_buy_score:.2f}")
-                            elif self.sentiment_active:
-                                self.logger.info(f"BUY skipped for {best_pair}: sentiment guard active")
-                            elif self._count_open_positions() >= self.max_open_positions:
+                                continue
+                            if self._count_open_positions() >= self.max_open_positions:
                                 self.logger.info("BUY skipped: max open positions reached")
-                            elif not self._is_mtf_trend_bullish(best_pair):
-                                self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
-                            elif not self._is_trading_hours():
+                                continue
+                            if not self._is_trading_hours():
                                 self.logger.info(
                                     f"BUY skipped: outside trading hours "
                                     f"({self.trading_hours_start_utc}:00-{self.trading_hours_end_utc}:00 UTC)"
                                 )
-                            elif not self._has_sufficient_volume(best_pair):
-                                pass  # already logged inside _has_sufficient_volume
+                                continue
+
+                            # Regime check (cached)
+                            try:
+                                now = time.time()
+                                if (now - self._regime_cache.get('ts', 0)) > self._regime_cache_ttl:
+                                    self._update_regime_cache()
+                                if self.enable_regime_filter and not bool(self._regime_cache.get('risk_on', True)):
+                                    self.logger.info("BUY skipped: regime filter is RISK_OFF (cached)")
+                                    continue
+                            except Exception:
+                                pass
+
+                            # Expensive checks only now
+                            if self._bear_mode_active:
+                                self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
+                                continue
+                            if self.sentiment_active:
+                                self.logger.info(f"BUY skipped for {best_pair}: sentiment guard active")
+                                continue
+                            if not self._is_mtf_trend_bullish(best_pair):
+                                self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
+                                continue
+                            if not self._has_sufficient_volume(best_pair):
+                                continue  # already logged inside
                             else:
                                 # Re-entry guard: block buys for configured pairs until the last closed
                                 # round-trip for that pair achieved min_reentry_profit_pct net profit.
@@ -2587,16 +2722,46 @@ class Backtester:
                     continue
                 # Simulate realistic fill price using orderbook depth (buy consumes asks)
                 fill_price = self._simulate_fill_price_from_orderbook(primary, 'buy', volume, fallback_price=price)
-                cost = volume * fill_price
+                # Latency model: small price move during execution delay
+                try:
+                    latency_sec = float(bcfg.get('latency_seconds', 5.0))
+                    closes = [float(r[4]) for r in ohlc_data[primary][:i+1]]
+                    if len(closes) >= 3:
+                        rets = np.diff(closes) / np.array(closes[:-1])
+                        per_sec_vol = np.std(rets) / max(1.0, np.sqrt(float(interval)))
+                        latency_sigma = per_sec_vol * np.sqrt(latency_sec)
+                    else:
+                        latency_sigma = 0.0
+                    if latency_sigma > 0 and fill_price is not None:
+                        fill_price = float(fill_price) * (1.0 + float(np.random.normal(0.0, latency_sigma)))
+                except Exception:
+                    pass
+
+                cost = volume * (fill_price if fill_price is not None else price)
                 buy_fee = cost * fees_maker_frac
                 positions[primary] = volume
-                entry_prices[primary] = fill_price
+                entry_prices[primary] = (fill_price if fill_price is not None else price)
                 entry_costs[primary] = cost + buy_fee
                 balance -= (cost + buy_fee)
 
             elif signal == 'SELL' and positions[primary] > 0:
                 # Simulate exit fill price using orderbook depth (sell consumes bids)
                 fill_price = self._simulate_fill_price_from_orderbook(primary, 'sell', positions[primary], fallback_price=price)
+                # Latency model for exit
+                try:
+                    latency_sec = float(bcfg.get('latency_seconds', 5.0))
+                    closes = [float(r[4]) for r in ohlc_data[primary][:i+1]]
+                    if len(closes) >= 3:
+                        rets = np.diff(closes) / np.array(closes[:-1])
+                        per_sec_vol = np.std(rets) / max(1.0, np.sqrt(float(interval)))
+                        latency_sigma = per_sec_vol * np.sqrt(latency_sec)
+                    else:
+                        latency_sigma = 0.0
+                    if latency_sigma > 0 and fill_price is not None:
+                        fill_price = float(fill_price) * (1.0 + float(np.random.normal(0.0, latency_sigma)))
+                except Exception:
+                    pass
+
                 # Apply conservative exit slippage buffer on top of simulated fill if configured
                 if fill_price is None:
                     sell_price_effective = price * (1.0 - exit_slippage_frac)

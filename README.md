@@ -617,3 +617,11 @@ This software is for educational purposes. Trading cryptocurrency involves signi
 ---
 
 *Active development — contributions and feedback welcome.*
+
+## 🧭 Development Status (2026-04-25)
+
+- **Implemented:** 1h-signal refresh, ATR-based exits, volatility-scaled sizing, public API caching, sqlite token-bucket rate limiter, paper-mode order simulation, PAUSE file support (to halt buys), and backtester orderbook fill + latency model (initial implementation).
+- **Added tests:** unit tests for token-bucket and sizing utilities (see `tests/`).
+- **Pending:** extend backtester depth sampling and add unit tests for latency, run extended paper-mode experiments and collect metrics, update Pi deployment docs.
+
+If you'd like, I can run a short paper-mode experiment now and collect the trade journal for analysis.
