@@ -2140,6 +2140,15 @@ class TradingBot:
             available_eur = self._available_eur_for_buy()
             min_trade_eur = float(self.config.get('risk_management', {}).get('min_trade_eur', 10.0))
             planned_eur = self._get_dynamic_trade_amount_eur(pair, available_eur)
+            # Early Notional-Guard: avoid attempting orders below the configured
+            # min_auto_scale_notional which the execution layer may reject/scale.
+            min_auto_notional = float(self.config.get('risk_management', {}).get('min_auto_scale_notional', 1.0))
+            if planned_eur < min_auto_notional:
+                self.logger.info(
+                    f"BUY skipped for {pair}: planned notional {planned_eur:.2f} EUR < min_auto_scale_notional {min_auto_notional:.2f}"
+                )
+                return
+
             if planned_eur < min_trade_eur:
                 self.logger.info(f"BUY skipped for {pair}: insufficient free EUR ({available_eur:.2f})")
                 return
