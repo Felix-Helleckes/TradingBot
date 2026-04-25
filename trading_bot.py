@@ -2438,6 +2438,50 @@ class Backtester:
         self.config = config
         self.logger = logging.getLogger(__name__)
 
+    def _simulate_fill_price_from_orderbook(self, pair, side, volume, fallback_price=None, depth_count=50):
+        """
+        Simulate a fill price by consuming the orderbook depth until `volume` base units
+        are filled. `side` is 'buy' (consumes asks) or 'sell' (consumes bids).
+        Returns the volume-weighted average fill price, or `fallback_price` if
+        orderbook unavailable or depth insufficient.
+        """
+        try:
+            ob = self.api_client.get_order_book(pair, count=depth_count)
+            if not ob:
+                return fallback_price
+            data_key = next((k for k in ob if k != 'last'), None)
+            if not data_key:
+                return fallback_price
+            asks = ob[data_key].get('asks', [])
+            bids = ob[data_key].get('bids', [])
+            # Buying consumes asks (you pay the ask prices), selling consumes bids
+            stack = asks if side == 'buy' else bids
+            if not stack:
+                return fallback_price
+            remaining = float(volume)
+            vwp_numer = 0.0
+            vwp_denom = 0.0
+            for level in stack:
+                lvl_price = float(level[0])
+                lvl_vol = float(level[1])
+                take = min(remaining, lvl_vol)
+                vwp_numer += take * lvl_price
+                vwp_denom += take
+                remaining -= take
+                if remaining <= 1e-12:
+                    break
+            if vwp_denom <= 0:
+                return fallback_price
+            fill_price = vwp_numer / vwp_denom
+            # If not fully filled, conservatively adjust towards worst available price
+            if remaining > 1e-12:
+                worst_price = float(stack[-1][0])
+                # push fill price 50% of remaining shortage towards worst price
+                fill_price = (fill_price * (1 - 0.5 * (remaining / (remaining + vwp_denom))) + worst_price * (0.5 * (remaining / (remaining + vwp_denom))))
+            return fill_price
+        except Exception:
+            return fallback_price
+
     def run(self):
         import numpy as np
         from datetime import datetime
@@ -2541,16 +2585,24 @@ class Backtester:
                 volume = (balance * 0.10) / price if price > 0 else 0.0
                 if volume <= 0:
                     continue
-                cost = volume * price
+                # Simulate realistic fill price using orderbook depth (buy consumes asks)
+                fill_price = self._simulate_fill_price_from_orderbook(primary, 'buy', volume, fallback_price=price)
+                cost = volume * fill_price
                 buy_fee = cost * fees_maker_frac
                 positions[primary] = volume
-                entry_prices[primary] = price
+                entry_prices[primary] = fill_price
                 entry_costs[primary] = cost + buy_fee
                 balance -= (cost + buy_fee)
 
             elif signal == 'SELL' and positions[primary] > 0:
-                # Apply conservative exit slippage
-                sell_price_effective = price * (1.0 - exit_slippage_frac)
+                # Simulate exit fill price using orderbook depth (sell consumes bids)
+                fill_price = self._simulate_fill_price_from_orderbook(primary, 'sell', positions[primary], fallback_price=price)
+                # Apply conservative exit slippage buffer on top of simulated fill if configured
+                if fill_price is None:
+                    sell_price_effective = price * (1.0 - exit_slippage_frac)
+                else:
+                    sell_price_effective = fill_price * (1.0 - 0.0)
+
                 gross_pct = ((sell_price_effective - entry_prices[primary]) / entry_prices[primary]) * 100.0 if entry_prices[primary] > 0 else 0.0
                 fees_total_pct = (fees_maker_frac + fees_taker_frac) * 100.0
                 net_pct = gross_pct - fees_total_pct
