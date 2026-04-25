@@ -76,7 +76,7 @@ aggressive_autoscale = true
 dynamic_notional_fraction = 0.25
 
 [daytrading]
-enable_daytrading = false
+enable_daytrading = true
 max_hold_hours = 12
 intraday_sl_percent = 1.5
 intraday_tp_percent = 1.8

@@ -39,6 +39,8 @@ import random
 from pathlib import Path
 from order_lock import acquire_order_lock
 import threading
+from core import token_bucket
+from pathlib import Path as _Path
 
 # Simple local cache for OHLC to reduce repeated API calls during large grid runs
 _CACHE_DIR = Path(__file__).parent / 'data' / 'cache' / 'kraken'
@@ -62,6 +64,19 @@ class KrakenAPI:
         # thundering-herd behaviour when many parts of the code call the API.
         self._rate_lock = threading.Lock()
         self._next_allowed = 0.0
+        # Initialize sqlite token-bucket for cross-process rate limiting (best-effort)
+        try:
+            db_dir = _Path(__file__).parent / 'data'
+            db_dir.mkdir(parents=True, exist_ok=True)
+            tb_path = str(db_dir / 'token_bucket.db')
+            token_bucket.init_db(tb_path)
+            # default: capacity 10 tokens, refill 1 token/sec (allows bursts)
+            token_bucket.create_bucket('kraken_api', capacity=10.0, refill_rate_per_sec=1.0)
+            self._tb_name = 'kraken_api'
+            self._use_token_bucket = True
+        except Exception:
+            self.logger.debug('Token-bucket DB init failed; falling back to instance limiter')
+            self._use_token_bucket = False
 
     def _handle_error(self, response, action):
         if response.get('error'):
@@ -726,6 +741,16 @@ class KrakenAPI:
         """Simple rate limiter: ensures at least `rate_limit_delay` seconds
         elapse between successive API calls on this instance.
         """
+        # Prefer central token-bucket if available
+        if getattr(self, '_use_token_bucket', False):
+            try:
+                ok = token_bucket.try_consume(self._tb_name, amount=1.0, block=True, timeout=5.0)
+                if ok:
+                    return
+            except Exception:
+                # fall through to local limiter
+                pass
+
         with self._rate_lock:
             now = time.time()
             if now < self._next_allowed:
