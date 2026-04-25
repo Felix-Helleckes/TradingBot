@@ -14,36 +14,26 @@ Setup:
     4. Restart the bot service.
 """
 
-import logging
-import os
+"""Notifier shim (disabled).
 
-import requests
+This repository previously sent Telegram messages via `core.notifier.send()`.
+Per project configuration this has been disabled — `send()` is now a
+no-op that returns False and logs a debug message when invoked.
+
+Keeping the module and function avoids touching callers throughout the
+codebase while ensuring no external HTTP requests are made.
+"""
+
+import logging
 
 logger = logging.getLogger(__name__)
 
-_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-_BASE_URL = f"https://api.telegram.org/bot{_TOKEN}"
-
 
 def send(message: str) -> bool:
-    """Send *message* to the configured Telegram chat.
+    """No-op notifier. Returns False to indicate no message was sent.
 
-    Returns True on success, False on failure (e.g. no credentials configured).
-    Never raises — all errors are logged and swallowed so the bot keeps running.
+    Callers can continue to call `core.notifier.send(...)` safely; this
+    implementation prevents outgoing Telegram requests.
     """
-    if not _TOKEN or not _CHAT_ID:
-        return False
-    try:
-        resp = requests.post(
-            f"{_BASE_URL}/sendMessage",
-            json={"chat_id": _CHAT_ID, "text": message, "parse_mode": "HTML"},
-            timeout=5,
-        )
-        if not resp.ok:
-            logger.warning("Telegram notification failed: %s", resp.text)
-            return False
-        return True
-    except Exception as exc:
-        logger.warning("Telegram notification error: %s", exc)
-        return False
+    logger.debug("Notifier disabled: suppressed Telegram message: %s", (message[:200] + '...') if len(message) > 200 else message)
+    return False
