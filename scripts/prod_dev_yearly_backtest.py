@@ -12,8 +12,10 @@ import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import nas_paths as _nas_paths
+
 _NAS = _nas_paths()
 CACHE_DIR = _NAS["bot_cache"] / "mentor_cache_1h"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -148,7 +150,7 @@ def mtf_regime_score(prices: List[float]):
     vol = 0.0
     if mean > 0:
         var = sum((p - mean) ** 2 for p in recent) / len(recent)
-        vol = ((var ** 0.5) / mean) * 100
+        vol = ((var**0.5) / mean) * 100
     vol_penalty = max(0.0, vol - 2.2) * 1.5
     return trend + momentum - vol_penalty
 
@@ -207,7 +209,9 @@ def run_profile(series: Dict[str, Dict[int, float]], timeline: List[int], profil
             sl = -0.7 if tag[p] == "scalp" else -2.8
             max_h = 6 if tag[p] == "scalp" else 36
             held_h = (ts - et[p]) / 3600
-            flip = (pos[p] == 1 and (not risk_on) and sigs[p] == "SELL") or (pos[p] == -1 and risk_on and sigs[p] == "BUY")
+            flip = (pos[p] == 1 and (not risk_on) and sigs[p] == "SELL") or (
+                pos[p] == -1 and risk_on and sigs[p] == "BUY"
+            )
 
             if pnl_pct >= tp or pnl_pct <= sl or held_h >= max_h or flip:
                 if pos[p] == 1:

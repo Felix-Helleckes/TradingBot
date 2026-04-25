@@ -9,7 +9,12 @@ Usage:
     --quick  : smaller grid (27 combos) for fast iteration
 """
 from __future__ import annotations
-import argparse, json, sys, time, itertools
+
+import argparse
+import itertools
+import json
+import sys
+import time
 from pathlib import Path
 
 # Add project root to path
@@ -30,21 +35,19 @@ Path("reports").mkdir(exist_ok=True)
 
 # Parameter grids
 if args.quick:
-    oversold_vals   = [28, 33, 38]         # RSI buy threshold
-    overbought_vals = [62, 67, 72]         # RSI sell threshold
-    base_tp_vals    = [2.0, 3.0, 4.5]     # base TP%
-    atr_mult_vals   = [1.5, 2.0, 2.5]     # ATR TP multiplier
-    min_score_vals  = [8.0]               # min buy score
+    oversold_vals = [28, 33, 38]  # RSI buy threshold
+    overbought_vals = [62, 67, 72]  # RSI sell threshold
+    base_tp_vals = [2.0, 3.0, 4.5]  # base TP%
+    atr_mult_vals = [1.5, 2.0, 2.5]  # ATR TP multiplier
+    min_score_vals = [8.0]  # min buy score
 else:
-    oversold_vals   = [25, 28, 30, 33, 36]
+    oversold_vals = [25, 28, 30, 33, 36]
     overbought_vals = [62, 64, 67, 70, 74]
-    base_tp_vals    = [1.5, 2.0, 2.5, 3.0, 4.0]
-    atr_mult_vals   = [1.5, 2.0, 2.5, 3.0]
-    min_score_vals  = [6.0, 8.0, 10.0]
+    base_tp_vals = [1.5, 2.0, 2.5, 3.0, 4.0]
+    atr_mult_vals = [1.5, 2.0, 2.5, 3.0]
+    min_score_vals = [6.0, 8.0, 10.0]
 
-combos = list(itertools.product(
-    oversold_vals, overbought_vals, base_tp_vals, atr_mult_vals, min_score_vals
-))
+combos = list(itertools.product(oversold_vals, overbought_vals, base_tp_vals, atr_mult_vals, min_score_vals))
 print(f"Running {len(combos)} combinations × {args.days}d backtest (initial={args.initial}€)")
 print("=" * 70)
 
@@ -52,10 +55,10 @@ results = []
 t0 = time.time()
 for i, (oversold, overbought, base_tp, atr_mult, min_score) in enumerate(combos):
     # patch globals
-    bt._MR_OVERSOLD   = oversold
+    bt._MR_OVERSOLD = oversold
     bt._MR_OVERBOUGHT = overbought
-    bt._BASE_TP_PCT   = base_tp
-    bt._ATR_TP_MULT   = atr_mult
+    bt._BASE_TP_PCT = base_tp
+    bt._ATR_TP_MULT = atr_mult
     bt._MIN_BUY_SCORE = min_score
 
     try:
@@ -70,18 +73,25 @@ for i, (oversold, overbought, base_tp, atr_mult, min_score) in enumerate(combos)
         continue
 
     ret_pct = r["return_pct"]
-    sharpe  = r["metrics"].get("sharpe") or 0.0
-    wr      = r["winrate_pct"]
-    trades  = r["closed_trades"]
-    dd      = r["max_drawdown_pct"]
+    sharpe = r["metrics"].get("sharpe") or 0.0
+    wr = r["winrate_pct"]
+    trades = r["closed_trades"]
+    dd = r["max_drawdown_pct"]
     # composite score: return weighted by sharpe, penalise deep drawdowns
     composite = ret_pct * (1 + max(0.0, sharpe) * 0.5) - (dd * 0.3)
 
     row = {
-        "oversold": oversold, "overbought": overbought,
-        "base_tp": base_tp, "atr_mult": atr_mult, "min_score": min_score,
-        "return_pct": ret_pct, "sharpe": sharpe, "winrate_pct": wr,
-        "trades": trades, "max_dd_pct": dd, "composite": round(composite, 3),
+        "oversold": oversold,
+        "overbought": overbought,
+        "base_tp": base_tp,
+        "atr_mult": atr_mult,
+        "min_score": min_score,
+        "return_pct": ret_pct,
+        "sharpe": sharpe,
+        "winrate_pct": wr,
+        "trades": trades,
+        "max_dd_pct": dd,
+        "composite": round(composite, 3),
     }
     results.append(row)
 

@@ -27,17 +27,19 @@ Usage:
 import argparse
 import json
 from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
 PAIRS = ["XETHZEUR", "SOLEUR", "ADAEUR", "XXRPZEUR", "LINKEUR"]
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import nas_paths as _nas_paths
+
 _NAS = _nas_paths()
 DATA_DIR = _NAS["bot_cache"] / "daytrading_15m"
 MENTOR_CACHE_DIR = _NAS["bot_cache"] / "mentor_cache_1h"
@@ -52,6 +54,7 @@ ATR_PERIOD = 14
 
 
 # ── Indicators ────────────────────────────────────────────────────────────────
+
 
 def calc_ema(prices: List[float], period: int) -> Optional[float]:
     if len(prices) < period:
@@ -90,9 +93,10 @@ def calc_atr_pct(prices: List[float], period: int = ATR_PERIOD) -> float:
 
 # ── Signal ────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class DaytradeSignal:
-    action: str = "HOLD"   # BUY / SELL / HOLD
+    action: str = "HOLD"  # BUY / SELL / HOLD
     score: float = 0.0
     ema_fast: Optional[float] = None
     ema_slow: Optional[float] = None
@@ -104,8 +108,8 @@ def generate_signal(prices: List[float], prev_prices: List[float]) -> DaytradeSi
     if len(prices) < EMA_SLOW + 2:
         return DaytradeSignal()
 
-    ema_fast_now  = calc_ema(prices, EMA_FAST)
-    ema_slow_now  = calc_ema(prices, EMA_SLOW)
+    ema_fast_now = calc_ema(prices, EMA_FAST)
+    ema_slow_now = calc_ema(prices, EMA_SLOW)
     ema_fast_prev = calc_ema(prices[:-1], EMA_FAST)
     ema_slow_prev = calc_ema(prices[:-1], EMA_SLOW)
     rsi = calc_rsi(prices, RSI_PERIOD)
@@ -131,15 +135,14 @@ def generate_signal(prices: List[float], prev_prices: List[float]) -> DaytradeSi
         action = "HOLD"
 
     signed_score = score if action == "BUY" else (-score if action == "SELL" else 0.0)
-    return DaytradeSignal(action=action, score=signed_score,
-                          ema_fast=ema_fast_now, ema_slow=ema_slow_now, rsi=rsi)
+    return DaytradeSignal(action=action, score=signed_score, ema_fast=ema_fast_now, ema_slow=ema_slow_now, rsi=rsi)
 
 
 # ── Data loader ───────────────────────────────────────────────────────────────
 
+
 def load_15m_data(pair: str, since_ts: int, end_ts: int) -> Dict[int, float]:
-    candidates = sorted(DATA_DIR.glob(f"{pair}_*_15m.json"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(DATA_DIR.glob(f"{pair}_*_15m.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
         return {}
     raw = {int(k): float(v) for k, v in json.loads(candidates[0].read_text()).items()}
@@ -161,9 +164,10 @@ def load_data(pair: str, since_ts: int, end_ts: int, use_1h: bool) -> Dict[int, 
 
 # ── Backtest ──────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Position:
-    side: int = 0        # 1 long, -1 short (shorts disabled for now)
+    side: int = 0  # 1 long, -1 short (shorts disabled for now)
     qty: float = 0.0
     entry_price: float = 0.0
     entry_ts: int = 0
@@ -200,8 +204,8 @@ def run_backtest(
     if not available_pairs:
         msg = (
             "No 1h cache data found. Expected data/mentor_cache_1h/*_60m.json"
-            if use_1h else
-            "No 15m data found. Run: python3 scripts/collect_15m_daytrading.py --days 90"
+            if use_1h
+            else "No 15m data found. Run: python3 scripts/collect_15m_daytrading.py --days 90"
         )
         return {"error": msg}
 
@@ -242,10 +246,7 @@ def run_backtest(
                 price[p] = px
 
         # Update peak/drawdown
-        eq_now = cash + sum(
-            pos[p].qty * price.get(p, pos[p].entry_price)
-            for p in available_pairs if pos[p].side == 1
-        )
+        eq_now = cash + sum(pos[p].qty * price.get(p, pos[p].entry_price) for p in available_pairs if pos[p].side == 1)
         peak_eq = max(peak_eq, eq_now)
         if peak_eq > 0:
             max_dd = max(max_dd, (peak_eq - eq_now) / peak_eq * 100)
@@ -277,8 +278,7 @@ def run_backtest(
                 cash += position.qty * exit_px - fee
 
                 reason = "TP" if hit_tp else ("SL" if hit_sl else "TIME")
-                closed.append({"pair": p, "pnl_eur": pnl_eur, "reason": reason,
-                               "held_h": round(held_h, 1)})
+                closed.append({"pair": p, "pnl_eur": pnl_eur, "reason": reason, "held_h": round(held_h, 1)})
 
                 if pnl_eur < 0:
                     consecutive_losses += 1
@@ -372,9 +372,14 @@ def run_backtest(
         "by_pair_pnl": {k: round(v, 2) for k, v in sorted(by_pair.items())},
         "exit_reasons": by_reason,
         "params": {
-            "tp_pct": tp_pct, "sl_pct": sl_pct, "max_hold_h": max_hold_h,
-            "atr_tp_mult": atr_tp_mult, "cooldown_min": cooldown_min,
-            "ema_fast": EMA_FAST, "ema_slow": EMA_SLOW, "rsi_period": RSI_PERIOD,
+            "tp_pct": tp_pct,
+            "sl_pct": sl_pct,
+            "max_hold_h": max_hold_h,
+            "atr_tp_mult": atr_tp_mult,
+            "cooldown_min": cooldown_min,
+            "ema_fast": EMA_FAST,
+            "ema_slow": EMA_SLOW,
+            "rsi_period": RSI_PERIOD,
             "available_pairs": available_pairs,
         },
         "assumptions": {"fee_rate": fee_rate, "slippage_bps": slippage_bps, "mode": mode_label},
@@ -385,17 +390,17 @@ def sweep(days: int, initial: float, fee: float, slip: float, use_1h: bool = Fal
     if use_1h:
         # Wider params suitable for 1h EMA signals
         configs = [
-            dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=24,  cooldown_min=120),
-            dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=36,  cooldown_min=180),
-            dict(tp_pct=3.5, sl_pct=2.0, max_hold_h=48,  cooldown_min=240),
-            dict(tp_pct=4.0, sl_pct=2.0, max_hold_h=60,  cooldown_min=240),
-            dict(tp_pct=5.0, sl_pct=2.5, max_hold_h=72,  cooldown_min=360),
+            dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=24, cooldown_min=120),
+            dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=36, cooldown_min=180),
+            dict(tp_pct=3.5, sl_pct=2.0, max_hold_h=48, cooldown_min=240),
+            dict(tp_pct=4.0, sl_pct=2.0, max_hold_h=60, cooldown_min=240),
+            dict(tp_pct=5.0, sl_pct=2.5, max_hold_h=72, cooldown_min=360),
         ]
     else:
         configs = [
-            dict(tp_pct=1.5, sl_pct=0.8, max_hold_h=4,  cooldown_min=20),
-            dict(tp_pct=1.8, sl_pct=1.0, max_hold_h=6,  cooldown_min=30),
-            dict(tp_pct=2.0, sl_pct=1.2, max_hold_h=8,  cooldown_min=30),
+            dict(tp_pct=1.5, sl_pct=0.8, max_hold_h=4, cooldown_min=20),
+            dict(tp_pct=1.8, sl_pct=1.0, max_hold_h=6, cooldown_min=30),
+            dict(tp_pct=2.0, sl_pct=1.2, max_hold_h=8, cooldown_min=30),
             dict(tp_pct=2.5, sl_pct=1.5, max_hold_h=12, cooldown_min=45),
             dict(tp_pct=3.0, sl_pct=1.5, max_hold_h=16, cooldown_min=60),
         ]
@@ -410,10 +415,12 @@ def sweep(days: int, initial: float, fee: float, slip: float, use_1h: bool = Fal
         if "error" in r:
             print(r["error"])
             return
-        h = c['max_hold_h']
+        h = c["max_hold_h"]
         label = f"TP{c['tp_pct']}%/SL{c['sl_pct']}%/{h}h/{c['cooldown_min']}min"
-        print(f"{label:<44} {r['return_pct']:>+7.2f}% {r['winrate_pct']:>4.0f}% "
-              f"{r['closed_trades']:>6}  {r['max_drawdown_pct']:>6.1f}%")
+        print(
+            f"{label:<44} {r['return_pct']:>+7.2f}% {r['winrate_pct']:>4.0f}% "
+            f"{r['closed_trades']:>6}  {r['max_drawdown_pct']:>6.1f}%"
+        )
 
 
 def main():
@@ -427,8 +434,9 @@ def main():
     ap.add_argument("--max-hold-h", type=float, default=8.0, help="Max hold hours")
     ap.add_argument("--cooldown", type=int, default=30, help="Entry cooldown minutes")
     ap.add_argument("--sweep", action="store_true", help="Run parameter sweep")
-    ap.add_argument("--use-1h", action="store_true",
-                    help="Use 1h mentor_cache data instead of 15m (no collection needed)")
+    ap.add_argument(
+        "--use-1h", action="store_true", help="Use 1h mentor_cache data instead of 15m (no collection needed)"
+    )
     ap.add_argument("--out", type=str, default=None)
     args = ap.parse_args()
 
@@ -448,15 +456,21 @@ def main():
         return
 
     result = run_backtest(
-        args.days, args.initial, args.fee, args.slippage_bps,
-        tp_pct=args.tp, sl_pct=args.sl,
-        max_hold_h=args.max_hold_h, cooldown_min=args.cooldown,
+        args.days,
+        args.initial,
+        args.fee,
+        args.slippage_bps,
+        tp_pct=args.tp,
+        sl_pct=args.sl,
+        max_hold_h=args.max_hold_h,
+        cooldown_min=args.cooldown,
         use_1h=args.use_1h,
     )
     print(json.dumps(result, indent=2))
 
     if args.out:
         from pathlib import Path
+
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(result, indent=2))
 

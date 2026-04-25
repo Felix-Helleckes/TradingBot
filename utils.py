@@ -25,10 +25,11 @@ All paths are sourced from the ``[paths]`` section of ``config.toml`` so
 moving the NAS mount only requires editing one place.
 """
 
-import toml
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
+import toml
 
 _DEFAULT_CFG_PATH = Path(__file__).parent / "config.toml"
 
@@ -47,7 +48,7 @@ def load_config(config_path: str):
         if not Path(config_path).exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             config = toml.load(f)
 
         logging.info(f"Configuration loaded successfully from {config_path}")
@@ -104,7 +105,9 @@ def pct_to_frac(v: Any) -> float:
     return f / 100.0
 
 
-def apply_trade_costs(price: float, qty: float, cfg: Dict[str, Any], maker: bool = False, side: str = 'buy') -> Dict[str, float]:
+def apply_trade_costs(
+    price: float, qty: float, cfg: Dict[str, Any], maker: bool = False, side: str = "buy"
+) -> Dict[str, float]:
     """Apply configured fees to a hypothetical trade and return cost/proceeds.
 
     Args:
@@ -120,20 +123,20 @@ def apply_trade_costs(price: float, qty: float, cfg: Dict[str, Any], maker: bool
       - net_cost (for buys) or net_proceeds (for sells)
     """
     try:
-        rm = cfg.get('risk_management', {}) if isinstance(cfg, dict) else {}
-        maker_pct = pct_to_frac(rm.get('fees_maker_percent', 0.0))
-        taker_pct = pct_to_frac(rm.get('fees_taker_percent', 0.0))
+        rm = cfg.get("risk_management", {}) if isinstance(cfg, dict) else {}
+        maker_pct = pct_to_frac(rm.get("fees_maker_percent", 0.0))
+        taker_pct = pct_to_frac(rm.get("fees_taker_percent", 0.0))
         fee_pct = maker_pct if maker else taker_pct
         gross = float(price) * float(qty)
         fee_amt = gross * fee_pct
-        if side.lower() == 'buy':
+        if side.lower() == "buy":
             net_cost = gross + fee_amt
-            return {'fee': fee_amt, 'gross': gross, 'net_cost': net_cost}
+            return {"fee": fee_amt, "gross": gross, "net_cost": net_cost}
         else:
             net_proceeds = gross - fee_amt
-            return {'fee': fee_amt, 'gross': gross, 'net_proceeds': net_proceeds}
+            return {"fee": fee_amt, "gross": gross, "net_proceeds": net_proceeds}
     except Exception:
-        return {'fee': 0.0, 'gross': float(price) * float(qty), 'net_cost': float(price) * float(qty)}
+        return {"fee": 0.0, "gross": float(price) * float(qty), "net_cost": float(price) * float(qty)}
 
 
 def validate_config(config):
@@ -146,41 +149,44 @@ def validate_config(config):
     Returns:
         bool: True if valid, False otherwise.
     """
-    required_sections = ['bot_settings', 'risk_management', 'logging']
+    required_sections = ["bot_settings", "risk_management", "logging"]
     for section in required_sections:
         if section not in config:
             logging.warning(f"Missing config section: {section}")
             return False
 
-    bot_settings = config.get('bot_settings', {})
-    trade_amounts = bot_settings.get('trade_amounts', {})
+    bot_settings = config.get("bot_settings", {})
+    trade_amounts = bot_settings.get("trade_amounts", {})
 
     # Accept both legacy single-pair config and current multi-pair config
-    has_pairs = bool(bot_settings.get('trade_pairs')) or bool(bot_settings.get('trade_pair'))
+    has_pairs = bool(bot_settings.get("trade_pairs")) or bool(bot_settings.get("trade_pair"))
     if not has_pairs:
         logging.warning("Missing config key: bot_settings.trade_pairs (or legacy trade_pair)")
         return False
 
-    if 'trade_amount_eur' not in trade_amounts:
+    if "trade_amount_eur" not in trade_amounts:
         logging.warning("Missing config key: bot_settings.trade_amounts.trade_amount_eur")
         return False
 
-    risk = config.get('risk_management', {})
-    for k in ['max_drawdown_percent', 'stop_loss_percent']:
+    risk = config.get("risk_management", {})
+    for k in ["max_drawdown_percent", "stop_loss_percent"]:
         if k not in risk:
             logging.warning(f"Missing config key: risk_management.{k}")
             return False
 
-    logging_cfg = config.get('logging', {})
-    if 'log_level' not in logging_cfg:
+    logging_cfg = config.get("logging", {})
+    if "log_level" not in logging_cfg:
         logging.warning("Missing config key: logging.log_level")
         return False
 
     return True
 
 
+import fcntl
 # ── Atomic write & JSONL helpers ──────────────────────────────────────────────
-import json, os, tempfile, fcntl
+import json
+import os
+import tempfile
 
 
 def atomic_write_json(path: str, obj, mode: int = 0o600) -> bool:
@@ -192,9 +198,9 @@ def atomic_write_json(path: str, obj, mode: int = 0o600) -> bool:
     """
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(path) + '.', dir=os.path.dirname(path))
+        fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
         try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(obj, f, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
@@ -220,9 +226,9 @@ def append_jsonl_locked(path: str, obj) -> bool:
     """
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        line = json.dumps(obj, separators=(',', ':')) + "\n"
+        line = json.dumps(obj, separators=(",", ":")) + "\n"
         # Open for append and obtain an exclusive lock
-        with open(path, 'a+', encoding='utf-8') as f:
+        with open(path, "a+", encoding="utf-8") as f:
             fd = f.fileno()
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
@@ -252,7 +258,7 @@ def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_perc
     try:
         if not os.path.exists(jsonl_path):
             return None
-        with open(jsonl_path, 'r', encoding='utf-8') as f:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
             fd = f.fileno()
             try:
                 fcntl.flock(fd, fcntl.LOCK_SH)
@@ -271,9 +277,9 @@ def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_perc
                 j = json.loads(lines[i])
             except Exception:
                 continue
-            if (j.get('pair') or '').upper() != (pair or '').upper():
+            if (j.get("pair") or "").upper() != (pair or "").upper():
                 continue
-            if j.get('type', '').upper() == 'SELL':
+            if j.get("type", "").upper() == "SELL":
                 sell = j
                 # find the preceding BUY for the same pair
                 buy = None
@@ -282,13 +288,13 @@ def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_perc
                         b = json.loads(lines[k])
                     except Exception:
                         continue
-                    if (b.get('pair') or '').upper() == (pair or '').upper() and b.get('type', '').upper() == 'BUY':
+                    if (b.get("pair") or "").upper() == (pair or "").upper() and b.get("type", "").upper() == "BUY":
                         buy = b
                         break
                 if not buy:
                     return None
-                buy_price = float(buy.get('price', 0.0) or 0.0)
-                sell_price = float(sell.get('price', 0.0) or 0.0)
+                buy_price = float(buy.get("price", 0.0) or 0.0)
+                sell_price = float(sell.get("price", 0.0) or 0.0)
                 if buy_price <= 0:
                     return None
                 gross_pct = ((sell_price - buy_price) / buy_price) * 100.0
@@ -299,4 +305,3 @@ def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_perc
         return None
     except Exception:
         return None
-

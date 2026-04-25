@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, pstdev
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import pandas as pd
 
@@ -193,7 +193,9 @@ def features(prices: List[float], vols: List[float]) -> dict:
     return {"score": score, "signal": sig, "vol_pct": vol_pct}
 
 
-def run_profile(series: Dict[str, Dict[int, dict]], timeline: List[int], profile: Profile, initial: float = 200.0) -> dict:
+def run_profile(
+    series: Dict[str, Dict[int, dict]], timeline: List[int], profile: Profile, initial: float = 200.0
+) -> dict:
     cash = initial
     hist_price = {p: deque(maxlen=200) for p in PAIRS}
     hist_vol = {p: deque(maxlen=200) for p in PAIRS}
@@ -288,7 +290,11 @@ def run_profile(series: Dict[str, Dict[int, dict]], timeline: List[int], profile
             max_dd = max(max_dd, (peak - eq) / peak * 100) if peak > 0 else max_dd
             continue
 
-        cands = [(abs(score[p]), p) for p in PAIRS if pos[p] == 0 and signal[p] in ("BUY", "SELL") and abs(score[p]) >= profile.score_gate]
+        cands = [
+            (abs(score[p]), p)
+            for p in PAIRS
+            if pos[p] == 0 and signal[p] in ("BUY", "SELL") and abs(score[p]) >= profile.score_gate
+        ]
         if cands:
             _, bp = max(cands)
             px = last_px[bp]
@@ -380,7 +386,11 @@ def evaluate_consistency(series: Dict[str, Dict[int, dict]], full_timeline: List
 
 
 def merge_recommendation(main: dict, dev: dict, main_seg: List[dict], dev_seg: List[dict]) -> dict:
-    dev_better_segments = sum(1 for m, d in zip(main_seg, dev_seg) if d["return_pct"] > m["return_pct"] and d["max_drawdown_pct"] <= m["max_drawdown_pct"] + 0.8)
+    dev_better_segments = sum(
+        1
+        for m, d in zip(main_seg, dev_seg)
+        if d["return_pct"] > m["return_pct"] and d["max_drawdown_pct"] <= m["max_drawdown_pct"] + 0.8
+    )
     checks = {
         "return_edge": dev["return_pct"] >= main["return_pct"] + 3.0,
         "risk_not_worse": dev["max_drawdown_pct"] <= main["max_drawdown_pct"] + 1.0,

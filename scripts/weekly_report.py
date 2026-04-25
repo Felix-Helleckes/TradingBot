@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Weekly performance report — reads NAS trade history, outputs summary to log + reports/."""
 from __future__ import annotations
+
 import json
 import sys
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import nas_paths

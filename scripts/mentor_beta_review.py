@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,8 +14,10 @@ import requests
 
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils import nas_paths as _nas_paths
+
 _NAS = _nas_paths()
 CACHE_DIR = _NAS["bot_cache"] / "mentor_cache_1h"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -192,7 +194,11 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
             if position.side == 0 or px <= 0:
                 continue
             held_hours = (ts - position.entry_ts) / 3600 if position.entry_ts else 0
-            pnl_pct = ((px - position.entry_price) / position.entry_price) * 100 if position.side == 1 else ((position.entry_price - px) / position.entry_price) * 100
+            pnl_pct = (
+                ((px - position.entry_price) / position.entry_price) * 100
+                if position.side == 1
+                else ((position.entry_price - px) / position.entry_price) * 100
+            )
 
             tp = 1.2 if position.tag == "scalp" else 6.0
             sl = -0.8 if position.tag == "scalp" else -3.0
@@ -223,15 +229,25 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
                 pos[p] = Position()
 
         if ts - last_trade_ts < v.cooldown_sec:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
         if ts < pause_until:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
 
-        cands = [(abs(score[p]), p) for p in PAIRS if signal[p] in ("BUY", "SELL") and pos[p].side == 0 and abs(score[p]) >= v.score_gate]
+        cands = [
+            (abs(score[p]), p)
+            for p in PAIRS
+            if signal[p] in ("BUY", "SELL") and pos[p].side == 0 and abs(score[p]) >= v.score_gate
+        ]
         if not cands:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
 
         _, bp = max(cands)
@@ -239,7 +255,9 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
         sc = score[bp]
         px = price.get(bp, 0.0)
         if px <= 0:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
 
         bench_hist = list(hist.get("XXBTZEUR", []))[-20:]
@@ -251,7 +269,9 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
 
         allocation = min(v.alloc_cap, cash * v.alloc_pct) * (1.0 if risk_on else v.risk_off_scale) * vol_scale
         if allocation < 8.0:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
 
         is_scalp = abs(sc) >= 28
@@ -266,7 +286,9 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
         if direction == -1 and not v.allow_short:
             direction = None
         if direction is None:
-            eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+            eq = equity()
+            peak = max(peak, eq)
+            max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
             continue
 
         slip = slippage_bps / 10000.0
@@ -276,19 +298,27 @@ def run_variant(series: Dict[str, Dict[int, float]], days: int, v: Variant):
         if direction == 1:
             total = allocation * (1 + fee_rate)
             if total > cash:
-                eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+                eq = equity()
+                peak = max(peak, eq)
+                max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
                 continue
             cash -= total
         else:
             if allocation > cash:
-                eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+                eq = equity()
+                peak = max(peak, eq)
+                max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
                 continue
             cash -= allocation
 
-        pos[bp] = Position(side=direction, qty=qty, entry_price=entry_px, entry_ts=ts, tag=("scalp" if is_scalp else "swing"))
+        pos[bp] = Position(
+            side=direction, qty=qty, entry_price=entry_px, entry_ts=ts, tag=("scalp" if is_scalp else "swing")
+        )
         last_trade_ts = ts
 
-        eq = equity(); peak = max(peak, eq); max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
+        eq = equity()
+        peak = max(peak, eq)
+        max_dd = max(max_dd, (peak - eq) / peak * 100 if peak > 0 else 0)
 
     for p in PAIRS:
         position = pos[p]
@@ -337,7 +367,15 @@ def main():
         Variant(name="main_baseline"),
         Variant(name="trend_bias", allow_mr=False, score_gate=8, risk_off_scale=0.50),
         Variant(name="reversion_bias", allow_trend=False, score_gate=8, cooldown_sec=5400),
-        Variant(name="grid_safe_long_only", allow_short=False, score_gate=10, cooldown_sec=7200, alloc_pct=0.10, alloc_cap=20.0, risk_off_scale=0.45),
+        Variant(
+            name="grid_safe_long_only",
+            allow_short=False,
+            score_gate=10,
+            cooldown_sec=7200,
+            alloc_pct=0.10,
+            alloc_cap=20.0,
+            risk_off_scale=0.45,
+        ),
     ]
 
     runs = [run_variant(series, days, v) for v in variants]
