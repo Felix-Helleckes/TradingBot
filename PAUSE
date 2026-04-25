@@ -1,0 +1,2 @@
+# Created to pause buys — presence of this file will make the bot skip buy orders.
+# Remove this file to resume trading.
