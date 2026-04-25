@@ -4,9 +4,5 @@ REASON="$1"
 MSG="[TradingBot] Pause activated: $REASON"
 LOG=/home/felix/TradingBot/logs/pause_notify.log
 mkdir -p $(dirname "$LOG")
-if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-  curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d text="$MSG" > /dev/null 2>&1 || true
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) SENT: $MSG" >> "$LOG"
-else
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) NO-TELEGRAM: $MSG" >> "$LOG"
-fi
+# Telegram disabled: do not perform outbound requests. Always log as NO-TELEGRAM.
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) NO-TELEGRAM (suppressed): $MSG" >> "$LOG"

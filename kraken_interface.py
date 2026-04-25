@@ -38,6 +38,9 @@ import json
 import random
 from pathlib import Path
 from order_lock import acquire_order_lock
+import threading
+from core import token_bucket
+from pathlib import Path as _Path
 
 # Simple local cache for OHLC to reduce repeated API calls during large grid runs
 _CACHE_DIR = Path(__file__).parent / 'data' / 'cache' / 'kraken'
@@ -56,6 +59,24 @@ class KrakenAPI:
         self.logger = logging.getLogger(__name__)
         self.rate_limit_delay = 0.5  # seconds between API calls
         self.paper_mode = bool(paper_mode)
+        # Simple single-threaded rate limiter: ensure at least `rate_limit_delay`
+        # seconds between API calls from this instance. This prevents local
+        # thundering-herd behaviour when many parts of the code call the API.
+        self._rate_lock = threading.Lock()
+        self._next_allowed = 0.0
+        # Initialize sqlite token-bucket for cross-process rate limiting (best-effort)
+        try:
+            db_dir = _Path(__file__).parent / 'data'
+            db_dir.mkdir(parents=True, exist_ok=True)
+            tb_path = str(db_dir / 'token_bucket.db')
+            token_bucket.init_db(tb_path)
+            # default: capacity 10 tokens, refill 1 token/sec (allows bursts)
+            token_bucket.create_bucket('kraken_api', capacity=10.0, refill_rate_per_sec=1.0)
+            self._tb_name = 'kraken_api'
+            self._use_token_bucket = True
+        except Exception:
+            self.logger.debug('Token-bucket DB init failed; falling back to instance limiter')
+            self._use_token_bucket = False
 
     def _handle_error(self, response, action):
         if response.get('error'):
@@ -86,7 +107,7 @@ class KrakenAPI:
         for attempt in range(retries):
             if attempt == 0:
                 # small initial delay to avoid hammering
-                time.sleep(self.rate_limit_delay)
+                self._acquire_rate()
             else:
                 base = 2 ** attempt
                 # add jitter between 0.8x and 1.2x
@@ -123,7 +144,7 @@ class KrakenAPI:
         last_error = None
         for attempt in range(retries):
             if attempt == 0:
-                time.sleep(self.rate_limit_delay)
+                self._acquire_rate()
             else:
                 base = 2 ** attempt
                 delay = min(30.0, base * random.uniform(0.8, 1.2))
@@ -259,7 +280,8 @@ class KrakenAPI:
                 self.logger.error(f"Invalid volume: {volume}. Must be positive")
                 return None
 
-            time.sleep(self.rate_limit_delay)
+            # respect per-instance rate limiter before placement
+            self._acquire_rate()
 
             # Load risk config (if available)
             cfg_path = os.path.join(os.path.dirname(__file__), 'config.toml')
@@ -714,3 +736,29 @@ class KrakenAPI:
         except Exception as e:
             self.logger.exception(f"Error fetching trade history: {e}")
             return None
+
+    def _acquire_rate(self):
+        """Simple rate limiter: ensures at least `rate_limit_delay` seconds
+        elapse between successive API calls on this instance.
+        """
+        # Prefer central token-bucket if available
+        if getattr(self, '_use_token_bucket', False):
+            try:
+                ok = token_bucket.try_consume(self._tb_name, amount=1.0, block=True, timeout=5.0)
+                if ok:
+                    return
+            except Exception:
+                # fall through to local limiter
+                pass
+
+        with self._rate_lock:
+            now = time.time()
+            if now < self._next_allowed:
+                to_sleep = self._next_allowed - now
+                try:
+                    time.sleep(to_sleep)
+                except Exception:
+                    pass
+                now = time.time()
+            # schedule next allowed time
+            self._next_allowed = now + float(self.rate_limit_delay)

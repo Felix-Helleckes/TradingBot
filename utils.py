@@ -182,7 +182,10 @@ def validate_config(config):
     return True
 
 
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 # ── Atomic write & JSONL helpers ──────────────────────────────────────────────
 import json
 import os
@@ -230,14 +233,14 @@ def append_jsonl_locked(path: str, obj) -> bool:
         # Open for append and obtain an exclusive lock
         with open(path, "a+", encoding="utf-8") as f:
             fd = f.fileno()
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            if fcntl: fcntl.flock(fd, fcntl.LOCK_EX)
             try:
                 f.write(line)
                 f.flush()
                 os.fsync(fd)
             finally:
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    if fcntl: fcntl.flock(fd, fcntl.LOCK_UN)
                 except Exception:
                     pass
         return True
@@ -261,14 +264,14 @@ def last_closed_trade_net_profit_pct(jsonl_path: str, pair: str, fees_maker_perc
         with open(jsonl_path, "r", encoding="utf-8") as f:
             fd = f.fileno()
             try:
-                fcntl.flock(fd, fcntl.LOCK_SH)
+                if fcntl: fcntl.flock(fd, fcntl.LOCK_SH)
             except Exception:
                 pass
             try:
                 lines = f.read().splitlines()
             finally:
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    if fcntl: fcntl.flock(fd, fcntl.LOCK_UN)
                 except Exception:
                     pass
         # scan from the end to find last SELL for this pair

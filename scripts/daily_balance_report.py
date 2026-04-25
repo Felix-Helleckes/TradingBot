@@ -95,16 +95,10 @@ def load_pnl_state() -> dict:
 
 
 def send_telegram(token: str, chat_id: str, message: str) -> bool:
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-            timeout=10,
-        )
-        return resp.ok
-    except Exception as e:
-        print(f"Telegram error: {e}")
-        return False
+    # Notifications disabled: do not make outbound HTTP requests to Telegram.
+    # Keep function present so scripts can call it safely; return False to indicate no message sent.
+    print("Telegram notifications are disabled (send_telegram suppressed)")
+    return False
 
 
 def main() -> None:

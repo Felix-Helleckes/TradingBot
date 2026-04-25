@@ -62,7 +62,7 @@ enable_atr_dynamic_tp = true
 atr_tp_multiplier = 2.0
 enable_pyramiding = false
 pyramiding_add_pct = 0.5
-max_open_positions = 10
+max_open_positions = 0
 trade_cooldown_seconds = 10800
 global_trade_cooldown_seconds = 5400
 empty_sell_log_cooldown_seconds = 1800
@@ -76,7 +76,7 @@ aggressive_autoscale = true
 dynamic_notional_fraction = 0.25
 
 [daytrading]
-enable_daytrading = false
+enable_daytrading = true
 max_hold_hours = 12
 intraday_sl_percent = 1.5
 intraday_tp_percent = 1.8
