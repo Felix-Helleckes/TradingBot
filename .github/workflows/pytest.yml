@@ -35,7 +35,10 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install pytest; fi
+          # install runtime requirements if present
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # install development / test requirements if present, else ensure pytest is available
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; else pip install pytest; fi
 
       - name: Run pytest
         run: |
