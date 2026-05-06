@@ -7,7 +7,6 @@ base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 30
 trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
-allocation_per_trade_percent = 15.0
 
 [risk_management]
 max_drawdown_percent = 10.0
@@ -44,15 +43,15 @@ enable_volatility_targeting = true
 target_volatility_pct = 1.6
 max_consecutive_losses = 2
 pause_after_loss_streak_minutes = 180
-take_profit_percent = 5.0
+take_profit_percent = 4.0
 adaptive_take_profit = true
 max_take_profit_percent = 12.0
 sell_fee_buffer_percent = 0.45
 fees_maker_percent = 0.16
 fees_taker_percent = 0.26
 reentry_guard_pairs = [ "VER",]
-min_reentry_profit_pct = 0.0
-min_net_sell_profit_pct = 4.0
+min_reentry_profit_pct = 5.0
+min_net_sell_profit_pct = 3.0
 exit_slippage_buffer_pct = 0.35
 enable_atr_stop = true
 atr_period = 20
@@ -62,7 +61,7 @@ enable_atr_dynamic_tp = true
 atr_tp_multiplier = 2.0
 enable_pyramiding = false
 pyramiding_add_pct = 0.5
-max_open_positions = 5
+max_open_positions = 10
 trade_cooldown_seconds = 10800
 global_trade_cooldown_seconds = 5400
 empty_sell_log_cooldown_seconds = 1800
@@ -76,7 +75,7 @@ aggressive_autoscale = true
 dynamic_notional_fraction = 0.25
 
 [daytrading]
-enable_daytrading = true
+enable_daytrading = false
 max_hold_hours = 12
 intraday_sl_percent = 1.5
 intraday_tp_percent = 1.8
@@ -144,6 +143,6 @@ SOLEUR = 0.02
 XXRPZEUR = 5.0
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 50.0
+trade_amount_eur = 10.0
 initial_balance = 100.0
 target_balance_eur = 10000.0

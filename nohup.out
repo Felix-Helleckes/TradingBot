@@ -1,0 +1,132 @@
+INFO:analysis:Loaded price history for 9 pairs from buffer
+2026-04-22 19:08:58,992 - INFO - Loaded price history for 9 pairs from buffer
+INFO:trading_bot:Restored cooldown state: global_last=1776867526, pairs=['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-04-22 19:08:58,994 - INFO - Restored cooldown state: global_last=1776867526, pairs=['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+INFO:trading_bot:Pair normalized: XXBTZEUR -> XBTEUR
+2026-04-22 19:08:59,769 - INFO - Pair normalized: XXBTZEUR -> XBTEUR
+INFO:trading_bot:Pair normalized: XETHZEUR -> ETHEUR
+2026-04-22 19:08:59,769 - INFO - Pair normalized: XETHZEUR -> ETHEUR
+INFO:trading_bot:Pair normalized: XXRPZEUR -> XRPEUR
+2026-04-22 19:08:59,769 - INFO - Pair normalized: XXRPZEUR -> XRPEUR
+INFO:trading_bot:Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-04-22 19:08:59,770 - INFO - Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+INFO:__main__:Starting live trading...
+2026-04-22 19:08:59,791 - INFO - Starting live trading...
+INFO:trading_bot:============================================================
+Starting Kraken Trading Bot...
+2026-04-22 19:08:59,791 - INFO - ============================================================
+INFO:trading_bot:TRADING BOT STARTED - MULTI-PAIR MODE
+2026-04-22 19:08:59,792 - INFO - TRADING BOT STARTED - MULTI-PAIR MODE
+INFO:trading_bot:Watching: XBTEUR, ETHEUR, SOLEUR, XRPEUR
+2026-04-22 19:08:59,792 - INFO - Watching: XBTEUR, ETHEUR, SOLEUR, XRPEUR
+INFO:trading_bot:Target: 10000.0 EUR
+2026-04-22 19:08:59,792 - INFO - Target: 10000.0 EUR
+INFO:trading_bot:============================================================
+2026-04-22 19:08:59,792 - INFO - ============================================================
+INFO:trading_bot:Loaded P&L baseline: 100.00 EUR (started 2026-01-01T00:00:00+00:00)
+============================================================
+KRAKEN TRADING BOT - MULTI-PAIR MODE
+Watching 4 pairs: XBTEUR, ETHEUR, SOLEUR, XRPEUR
+Trade Amount: 10.0 EUR per trade
+Target Balance: 10000.0 EUR
+Press Ctrl+C to stop
+============================================================
+2026-04-22 19:09:00,352 - INFO - Loaded P&L baseline: 100.00 EUR (started 2026-01-01T00:00:00+00:00)
+INFO:trading_bot:Loaded 390 trades from NAS cache (trades_2026.json)
+2026-04-22 19:09:00,934 - INFO - Loaded 390 trades from NAS cache (trades_2026.json)
+INFO:trading_bot:Initial EUR Balance: 92.02 EUR
+2026-04-22 19:09:02,608 - INFO - Initial EUR Balance: 92.02 EUR
+INFO:trading_bot:Take-Profit: 6.0% | Stop-Loss: 2.0%
+2026-04-22 19:09:02,609 - INFO - Take-Profit: 6.0% | Stop-Loss: 2.0%
+INFO:trading_bot:Startup position: XBTEUR — no holdings (qty=0.00000000)
+2026-04-22 19:09:02,609 - INFO - Startup position: XBTEUR — no holdings (qty=0.00000000)
+INFO:trading_bot:Startup position: ETHEUR — no holdings (qty=0.00000000)
+2026-04-22 19:09:02,613 - INFO - Startup position: ETHEUR — no holdings (qty=0.00000000)
+INFO:trading_bot:Startup position: SOLEUR — no holdings (qty=0.00000000)
+2026-04-22 19:09:02,613 - INFO - Startup position: SOLEUR — no holdings (qty=0.00000000)
+INFO:trading_bot:Startup position: XRPEUR — no holdings (qty=0.00000000)
+2026-04-22 19:09:02,613 - INFO - Startup position: XRPEUR — no holdings (qty=0.00000000)
+INFO:trading_bot:[1] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:09:07,473 - INFO - [1] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[1] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:SELL signal for XRPEUR but no holdings
+2026-04-22 19:09:08,033 - INFO - SELL signal for XRPEUR but no holdings
+INFO:trading_bot:[2] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:09:42,862 - INFO - [2] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[2] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[3] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:10:18,789 - INFO - [3] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[3] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[4] BTC:BUY ETH:SELL SOL:BUY XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:10:54,179 - INFO - [4] BTC:BUY ETH:SELL SOL:BUY XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[4] BTC:BUY ETH:SELL SOL:BUY XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[5] BTC:BUY ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:11:30,104 - INFO - [5] BTC:BUY ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[5] BTC:BUY ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[6] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:12:05,527 - INFO - [6] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[6] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[7] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:12:41,508 - INFO - [7] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[7] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[8] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:13:16,865 - INFO - [8] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[8] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[9] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:13:52,797 - INFO - [9] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[9] BTC:SELL ETH:SELL SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[10] BTC:HOLD ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:14:28,197 - INFO - [10] BTC:HOLD ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[10] BTC:HOLD ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:root:Configuration loaded successfully from /home/felix/tradingbot/config.toml
+2026-04-22 19:14:28,756 - INFO - Configuration loaded successfully from /home/felix/tradingbot/config.toml
+INFO:trading_bot:Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-04-22 19:14:29,401 - INFO - Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+INFO:trading_bot:[11] BTC:SELL ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:15:05,310 - INFO - [11] BTC:SELL ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[11] BTC:SELL ETH:HOLD SOL:SELL XRP:HOLD | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[12] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:15:40,644 - INFO - [12] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[12] BTC:HOLD ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: SOLEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[13] BTC:SELL ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:16:16,576 - INFO - [13] BTC:SELL ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[13] BTC:SELL ETH:HOLD SOL:SELL XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[14] BTC:HOLD ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:16:51,917 - INFO - [14] BTC:HOLD ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[14] BTC:HOLD ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:SELL signal for ETHEUR but no holdings
+2026-04-22 19:16:52,459 - INFO - SELL signal for ETHEUR but no holdings
+INFO:trading_bot:[15] BTC:HOLD ETH:SELL SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:17:27,797 - INFO - [15] BTC:HOLD ETH:SELL SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[15] BTC:HOLD ETH:SELL SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[16] BTC:SELL ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:18:03,160 - INFO - [16] BTC:SELL ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[16] BTC:SELL ETH:SELL SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[17] BTC:HOLD ETH:SELL SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:18:39,069 - INFO - [17] BTC:HOLD ETH:SELL SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[17] BTC:HOLD ETH:SELL SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: ETHEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[18] BTC:BUY ETH:BUY SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:19:15,066 - INFO - [18] BTC:BUY ETH:BUY SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[18] BTC:BUY ETH:BUY SOL:HOLD XRP:SELL | RISK_ON/ACTIVE | Best: XRPEUR (SELL) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[19] BTC:BUY ETH:BUY SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:19:50,990 - INFO - [19] BTC:BUY ETH:BUY SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[19] BTC:BUY ETH:BUY SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XBTEUR: low volume (ratio 0.02 < 0.5)
+2026-04-22 19:19:53,163 - INFO - BUY skipped for XBTEUR: low volume (ratio 0.02 < 0.5)
+INFO:root:Configuration loaded successfully from /home/felix/tradingbot/config.toml
+2026-04-22 19:19:53,176 - INFO - Configuration loaded successfully from /home/felix/tradingbot/config.toml
+INFO:trading_bot:Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-04-22 19:19:53,844 - INFO - Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+INFO:trading_bot:[20] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:20:29,246 - INFO - [20] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[20] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XBTEUR: weak score 14.71 < min 20.00
+2026-04-22 19:20:30,360 - INFO - BUY skipped for XBTEUR: weak score 14.71 < min 20.00
+INFO:trading_bot:[21] BTC:BUY ETH:BUY SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:21:05,690 - INFO - [21] BTC:BUY ETH:BUY SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[21] BTC:BUY ETH:BUY SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[22] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:21:42,113 - INFO - [22] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[22] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[23] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:22:18,017 - INFO - [23] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[23] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XBTEUR: weak score 5.11 < min 20.00
+2026-04-22 19:22:19,100 - INFO - BUY skipped for XBTEUR: weak score 5.11 < min 20.00
+INFO:trading_bot:[24] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:22:53,937 - INFO - [24] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[24] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[25] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:23:29,827 - INFO - [25] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[25] BTC:HOLD ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: NONE (HOLD) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:[26] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:24:05,224 - INFO - [26] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[26] BTC:BUY ETH:HOLD SOL:HOLD XRP:HOLD | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XBTEUR: weak score 6.47 < min 20.00
+2026-04-22 19:24:06,322 - INFO - BUY skipped for XBTEUR: weak score 6.47 < min 20.00
+INFO:trading_bot:[27] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:24:41,713 - INFO - [27] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[27] BTC:BUY ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XBTEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XBTEUR: weak score 8.30 < min 20.00
+2026-04-22 19:24:42,793 - INFO - BUY skipped for XBTEUR: weak score 8.30 < min 20.00
+INFO:trading_bot:[28] BTC:HOLD ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+2026-04-22 19:25:17,669 - INFO - [28] BTC:HOLD ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233
+[28] BTC:HOLD ETH:HOLD SOL:HOLD XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 92.02EUR | Start: 92.02EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +0.00EUR | TotalPnL: -7.98EUR | Trades: 233INFO:trading_bot:BUY skipped for XRPEUR: weak score 1.60 < min 20.00
+2026-04-22 19:25:18,753 - INFO - BUY skipped for XRPEUR: weak score 1.60 < min 20.00
+INFO:root:Configuration loaded successfully from /home/felix/tradingbot/config.toml
+2026-04-22 19:25:18,764 - INFO - Configuration loaded successfully from /home/felix/tradingbot/config.toml
+INFO:trading_bot:Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-04-22 19:25:19,447 - INFO - Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
