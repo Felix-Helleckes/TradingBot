@@ -32,12 +32,18 @@ def _now():
 
 
 def create_bucket(name: str, capacity: float, refill_rate_per_sec: float):
+    """Create a token bucket if it doesn't exist yet.
+
+    Uses INSERT OR IGNORE so an existing bucket (with its current token state)
+    is preserved across bot restarts — the rate-limit protection survives
+    a crash/restart and doesn't start fresh with a full bucket.
+    """
     with _DB_LOCK:
         con = sqlite3.connect(_DB_PATH, timeout=5)
         try:
             cur = con.cursor()
             cur.execute(
-                "INSERT OR REPLACE INTO token_buckets (name, capacity, tokens, refill_rate_per_sec, last_ts) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO token_buckets (name, capacity, tokens, refill_rate_per_sec, last_ts) VALUES (?, ?, ?, ?, ?)",
                 (name, capacity, capacity, refill_rate_per_sec, _now()),
             )
             con.commit()

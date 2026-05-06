@@ -48,6 +48,10 @@ _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # TTL for cached OHLC (seconds)
 CACHE_TTL_SECONDS = 24 * 3600
 
+# Module-level cache for risk_management config to avoid re-reading config.toml
+# on every order placement.  Invalidated automatically after 120 seconds.
+_RISK_CFG_CACHE: dict = {'data': None, 'ts': 0.0, 'ttl': 120.0}
+
 
 class KrakenAPI:
     """Wrapper for Kraken API interactions."""
@@ -57,11 +61,17 @@ class KrakenAPI:
         """
         self.api = krakenex.API(api_key, api_secret)
         self.logger = logging.getLogger(__name__)
-        self.rate_limit_delay = 0.5  # seconds between API calls
+        self.rate_limit_delay = 1.0  # seconds between API calls (fallback limiter)
         self.paper_mode = bool(paper_mode)
         # Simple in-memory cache for public endpoints to reduce API calls
         self._public_cache = {}
-        self._public_cache_ttl = 60.0
+        self._public_cache_ttl = 120.0  # 2-minute cache: avoids re-fetching OHLC/ticker every loop
+        # Balance cache: the main loop calls get_account_balance() twice per iteration
+        # (once for EUR balance, once for holdings sync).  Cache for 30 s to avoid doubling
+        # the private-API counter hit while still reacting to fills within one loop cycle.
+        self._balance_cache_val = None
+        self._balance_cache_ts = 0.0
+        self._balance_cache_ttl = 30.0
         # Simple single-threaded rate limiter: ensure at least `rate_limit_delay`
         # seconds between API calls from this instance. This prevents local
         # thundering-herd behaviour when many parts of the code call the API.
@@ -80,6 +90,12 @@ class KrakenAPI:
         except Exception:
             self.logger.debug('Token-bucket DB init failed; falling back to instance limiter')
             self._use_token_bucket = False
+        # Short-lived open-orders cache: collapses multiple calls per loop cycle
+        # (reserve estimation + has_open_order check) into a single API hit.
+        # Invalidated after any order placement so post-trade checks stay fresh.
+        self._open_orders_cache_val = None
+        self._open_orders_cache_ts = 0.0
+        self._open_orders_cache_ttl = 20.0
 
     def _handle_error(self, response, action):
         if response.get('error'):
@@ -190,14 +206,37 @@ class KrakenAPI:
         self.logger.error(f"{endpoint} failed after {retries} retries due to rate limit: {last_error}")
         return None
 
+    def invalidate_balance_cache(self):
+        """Force the next get_account_balance() call to hit the API (e.g. after a trade fill)."""
+        self._balance_cache_ts = 0.0
+        self._balance_cache_val = None
+
+    def invalidate_open_orders_cache(self):
+        """Force the next get_open_orders() call to hit the API (e.g. after placing an order)."""
+        self._open_orders_cache_ts = 0.0
+        self._open_orders_cache_val = None
+
     def get_account_balance(self):
+        """Return account balances, using a short-lived cache to avoid duplicate calls.
+
+        The main trading loop calls this twice per iteration (once for EUR balance,
+        once inside _sync_account_state).  The 30-second cache collapses both into
+        a single Kraken API hit without losing freshness for order decisions.
+        Call ``invalidate_balance_cache()`` immediately after any trade fill.
+        """
         try:
+            now = time.time()
+            if self._balance_cache_val is not None and (now - self._balance_cache_ts) < self._balance_cache_ttl:
+                return self._balance_cache_val
             response = self._query_private_with_backoff('Balance')
             if response is None:
                 return None
             if self._handle_error(response, "Balance Query"):
                 return None
-            return response.get('result', {})
+            result = response.get('result', {})
+            self._balance_cache_val = result
+            self._balance_cache_ts = now
+            return result
         except Exception as e:
             self.logger.exception(f"Error fetching account balance: {e}")
             return None
@@ -303,13 +342,16 @@ class KrakenAPI:
             # respect per-instance rate limiter before placement
             self._acquire_rate()
 
-            # Load risk config (if available)
+            # Load risk config (if available) - TTL-cached to avoid disk read on every order
             cfg_path = os.path.join(os.path.dirname(__file__), 'config.toml')
             risk_cfg = {}
             try:
-                if os.path.exists(cfg_path):
-                    cfg = toml.load(cfg_path)
-                    risk_cfg = cfg.get('risk_management', {})
+                now_cfg = time.time()
+                if _RISK_CFG_CACHE['data'] is None or (now_cfg - _RISK_CFG_CACHE['ts']) > _RISK_CFG_CACHE['ttl']:
+                    if os.path.exists(cfg_path):
+                        _RISK_CFG_CACHE['data'] = toml.load(cfg_path).get('risk_management', {})
+                        _RISK_CFG_CACHE['ts'] = now_cfg
+                risk_cfg = _RISK_CFG_CACHE['data'] or {}
             except Exception:
                 self.logger.debug('Failed to load config for risk checks')
 
@@ -598,6 +640,9 @@ class KrakenAPI:
             if self._handle_error(response, f"Place {direction.upper()} Order"):
                 return None
             result = response.get('result', {})
+            # Order was accepted: invalidate caches so next check reflects the new state
+            self.invalidate_open_orders_cache()
+            self.invalidate_balance_cache()
             self.logger.info(
                 f"Order placed successfully: {direction} {volume} {pair} "
                 f"({order_type}, post_only={post_only}, reduce_only={reduce_only})"
@@ -608,13 +653,25 @@ class KrakenAPI:
             return None
 
     def get_open_orders(self):
+        """Return open orders, using a short-lived cache to avoid duplicate API calls.
+
+        Multiple callers per loop cycle (reserve estimation, has_open_order check)
+        are collapsed into a single OpenOrders request.  The cache is invalidated
+        by ``invalidate_open_orders_cache()`` after every order placement.
+        """
         try:
+            now = time.time()
+            if self._open_orders_cache_val is not None and (now - self._open_orders_cache_ts) < self._open_orders_cache_ttl:
+                return self._open_orders_cache_val
             response = self._query_private_with_backoff('OpenOrders')
             if response is None:
                 return None
             if self._handle_error(response, "Open Orders Query"):
                 return None
-            return response.get('result', {})
+            result = response.get('result', {})
+            self._open_orders_cache_val = result
+            self._open_orders_cache_ts = now
+            return result
         except Exception as e:
             self.logger.exception(f"Error fetching open orders: {e}")
             return None

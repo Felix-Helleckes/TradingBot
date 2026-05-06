@@ -104,6 +104,11 @@ except ImportError:
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from core import notifier as _notifier
+try:
+    from core.ws_feed import KrakenWSFeed as _KrakenWSFeed
+    _WS_FEED_AVAILABLE = True
+except ImportError:
+    _WS_FEED_AVAILABLE = False
 
 # NAS root — read from config [paths] nas_root, fallback to default mount point
 def _resolve_nas_root(config: dict) -> Path:
@@ -276,6 +281,13 @@ class TradingBot:
             )
         self.last_daily_reset_ts = int(time.time())
 
+        # Initialise dicts used by _init_pair_state BEFORE it is called
+        self._ema_bullish = {}
+        self._macd_1h_hist = {}
+        self._macd_15m_hist = {}
+        self._macd_15m_hist_prev = {}
+        self._partial_exit_done = {}
+
         self.valid_pairs = self._fetch_valid_trade_pairs(self.trade_pairs)
         self.trade_pairs = self.valid_pairs if self.valid_pairs else []
         self._init_pair_state(self.trade_pairs)
@@ -314,6 +326,34 @@ class TradingBot:
         # Trade history cache: avoids hitting Kraken API every loop iteration
         self._trade_history_cache: dict = {}    # {trade_id: trade_dict}
         self._trade_history_last_fetch: float = 0.0  # unix timestamp of last API fetch
+
+        # ── Multi-timeframe OHLC caches for EMA + MTF MACD ────────────────────
+
+        # ── EMA crossover filter ──────────────────────────────────────────────
+        tech_cfg = self.config.get('technical', {})
+        self.enable_ema_crossover_filter = bool(tech_cfg.get('enable_ema_crossover_filter', True))
+        self.ema_fast_period = int(tech_cfg.get('ema_fast_period', 9))
+        self.ema_slow_period = int(tech_cfg.get('ema_slow_period', 21))
+
+        # ── Multi-timeframe MACD filter ───────────────────────────────────────
+        self.enable_mtf_macd_filter = bool(tech_cfg.get('enable_mtf_macd_filter', True))
+
+        # ── Partial take-profit exit ──────────────────────────────────────────
+        self.enable_partial_exit = bool(tech_cfg.get('enable_partial_exit', True))
+        self.partial_exit_trigger_pct = float(tech_cfg.get('partial_exit_trigger_pct', 4.0))
+        self.partial_exit_fraction = float(tech_cfg.get('partial_exit_fraction', 0.5))
+        self.partial_exit_min_remaining_eur = float(tech_cfg.get('partial_exit_min_remaining_eur', 5.0))
+        # _partial_exit_done dict already created before _init_pair_state; no re-init here
+
+        # ── WebSocket price feed (zero-cost live prices, falls back to REST) ──
+        self.ws_feed = None
+        ws_cfg = self.config.get('websocket', {})
+        if bool(ws_cfg.get('enable_ws_feed', True)) and _WS_FEED_AVAILABLE:
+            try:
+                self.ws_feed = _KrakenWSFeed(self.trade_pairs)
+                self.ws_feed.start()
+            except Exception as _e:
+                self.logger.warning(f"WebSocket feed could not start: {_e} — falling back to REST polling")
 
     def _notify_pause(self, reason):
         """Log and attempt to notify an external channel when a trading pause activates."""
@@ -475,6 +515,12 @@ class TradingBot:
             self.trade_metrics.setdefault(pair, {"closed": 0, "wins": 0, "losses": 0, "sum_pnl": 0.0})
             self.last_trade_at.setdefault(pair, 0)
             self.entry_timestamps.setdefault(pair, None)
+            # MTF indicator caches and partial exit state
+            self._ema_bullish.setdefault(pair, None)
+            self._macd_1h_hist.setdefault(pair, None)
+            self._macd_15m_hist.setdefault(pair, None)
+            self._macd_15m_hist_prev.setdefault(pair, None)
+            self._partial_exit_done.setdefault(pair, False)
 
     def _get_target_balance(self):
         try:
@@ -725,6 +771,16 @@ class TradingBot:
             self.bear_benchmark_pair = str(bear_cfg.get('bear_benchmark_pair', self.bear_benchmark_pair)).upper()
             self.bear_log_interval_minutes = int(bear_cfg.get('bear_log_interval_minutes', self.bear_log_interval_minutes))
 
+            tech_cfg = self.config.get('technical', {})
+            self.enable_ema_crossover_filter = bool(tech_cfg.get('enable_ema_crossover_filter', self.enable_ema_crossover_filter))
+            self.ema_fast_period = int(tech_cfg.get('ema_fast_period', self.ema_fast_period))
+            self.ema_slow_period = int(tech_cfg.get('ema_slow_period', self.ema_slow_period))
+            self.enable_mtf_macd_filter = bool(tech_cfg.get('enable_mtf_macd_filter', self.enable_mtf_macd_filter))
+            self.enable_partial_exit = bool(tech_cfg.get('enable_partial_exit', self.enable_partial_exit))
+            self.partial_exit_trigger_pct = float(tech_cfg.get('partial_exit_trigger_pct', self.partial_exit_trigger_pct))
+            self.partial_exit_fraction = float(tech_cfg.get('partial_exit_fraction', self.partial_exit_fraction))
+            self.partial_exit_min_remaining_eur = float(tech_cfg.get('partial_exit_min_remaining_eur', self.partial_exit_min_remaining_eur))
+
             self.last_config_reload = datetime.now()
             self.loop_interval_sec = int(self.config.get('bot_settings', {}).get('loop_interval_seconds', self.loop_interval_sec))
             return True
@@ -832,7 +888,15 @@ class TradingBot:
         (post-trade or on first boot) it bypasses the 10-minute cache and
         re-fetches the full trade history from Kraken / NAS to recompute the
         average entry price.
+
+        Also invalidates the balance cache on force calls so the post-trade sync
+        always sees the account state after the fill, not cached pre-trade data.
         """
+        if force_history:
+            try:
+                self.api_client.invalidate_balance_cache()
+            except Exception:
+                pass
         self.get_crypto_holdings()
         self.load_purchase_prices_from_history(force=force_history)
 
@@ -1792,12 +1856,17 @@ class TradingBot:
             self.logger.warning(f"OHLC warmup failed for {pair}: {e}")
 
     def _refresh_hourly_signals(self):
-        """Refresh signals using 1h OHLC candles for all configured pairs.
-        This reduces noise from tick-by-tick signals and centralizes signal
-        computation on a slower timeframe.
+        """Refresh signals and all MTF indicators for every configured pair.
+
+        Per pair (every ``signal_refresh_interval`` seconds, default 5 min):
+        - Fetches 1h OHLC  → signal/score, EMA crossover, 1h MACD histogram
+        - Fetches 15m OHLC → 15m MACD histogram (for MTF MACD filter)
+
+        All results are cached in instance dicts and read by the buy guards.
         """
         for pair in self.trade_pairs:
             try:
+                # ── 1h OHLC: signal + EMA crossover + 1h MACD ──────────────────
                 ohlc = self.api_client.get_ohlc_data(pair, interval=60)
                 if not ohlc:
                     continue
@@ -1807,14 +1876,190 @@ class TradingBot:
                 series = ohlc[data_key]
                 if not series:
                     continue
-                last_close = float(series[-1][4])
-                market_data = {pair: {'c': [last_close]}}
-                signal, score = self.analysis_tool.generate_signal_with_score(market_data)
+                closes_1h = [float(row[4]) for row in series]
+
+                # Signal & score
+                last_close = closes_1h[-1]
+                signal, score = self.analysis_tool.generate_signal_with_score({pair: {'c': [last_close]}})
                 self.pair_signals[pair] = signal
                 self.pair_scores[pair] = score
+
+                # EMA crossover filter (EMA9 vs EMA21 on 1h)
+                _, _, ema_bull = self.analysis_tool.calculate_ema_crossover(
+                    closes_1h,
+                    fast=self.ema_fast_period,
+                    slow=self.ema_slow_period,
+                )
+                self._ema_bullish[pair] = ema_bull
+
+                # 1h MACD histogram
+                _, _, macd_h_1h = self.analysis_tool.calculate_macd(closes_1h)
+                self._macd_1h_hist[pair] = macd_h_1h
+
                 time.sleep(0.2)
+
+                # ── 15m OHLC: 15m MACD histogram ────────────────────────────
+                try:
+                    ohlc_15 = self.api_client.get_ohlc_data(pair, interval=15)
+                    if ohlc_15:
+                        dk15 = next((k for k in ohlc_15 if k != 'last'), None)
+                        if dk15 and ohlc_15[dk15]:
+                            closes_15 = [float(row[4]) for row in ohlc_15[dk15]]
+                            _, _, h15 = self.analysis_tool.calculate_macd(closes_15)
+                            # Previous histogram value for trend direction
+                            h15_prev = None
+                            if len(closes_15) > 36:
+                                _, _, h15_prev = self.analysis_tool.calculate_macd(closes_15[:-1])
+                            self._macd_15m_hist[pair] = h15
+                            self._macd_15m_hist_prev[pair] = h15_prev
+                            time.sleep(0.2)
+                except Exception as _e15:
+                    self.logger.debug(f"15m MACD fetch error for {pair}: {_e15}")
+
             except Exception as e:
                 self.logger.debug(f"Hourly signal refresh error for {pair}: {e}")
+
+    # ── New technical filters ─────────────────────────────────────────────────
+
+    def _is_ema_trend_bullish(self, pair):
+        """Return True when the 1h EMA crossover is bullish (EMA-fast > EMA-slow).
+
+        Computed in ``_refresh_hourly_signals`` every ``signal_refresh_interval``
+        seconds and cached in ``self._ema_bullish``.  Returns True (allow trade)
+        when no data is available yet so the bot isn't blocked on first startup.
+        """
+        if not self.enable_ema_crossover_filter:
+            return True
+        val = self._ema_bullish.get(pair)
+        if val is None:
+            return True  # no data yet — don't block
+        if not val:
+            self.logger.info(
+                f"EMA crossover filter: BUY blocked for {pair} "
+                f"(EMA{self.ema_fast_period} < EMA{self.ema_slow_period} on 1h — bearish trend)"
+            )
+        return val
+
+    def _is_mtf_macd_buy_aligned(self, pair):
+        """Return True when the MTF MACD picture is not strongly bearish.
+
+        Logic (both timeframes must look bearish to block):
+        - 1h  MACD histogram < -0.05% of price  AND
+        - 15m MACD histogram < 0
+
+        Requiring BOTH avoids blocking during consolidation where MACD hovers
+        near zero.  When data is missing the check passes transparently.
+        """
+        if not self.enable_mtf_macd_filter:
+            return True
+        h1h = self._macd_1h_hist.get(pair)
+        h15m = self._macd_15m_hist.get(pair)
+        if h1h is None or h15m is None:
+            return True  # no data yet
+        price = self.pair_prices.get(pair, 1.0) or 1.0
+        h1h_pct = (h1h / price) * 100.0
+        if h1h_pct < -0.05 and h15m < 0:
+            self.logger.info(
+                f"MTF MACD filter: BUY blocked for {pair} "
+                f"(1h hist {h1h_pct:.3f}%, 15m hist {h15m:.5f} — both bearish)"
+            )
+            return False
+        return True
+
+    def _execute_partial_exit(self, pair, price):
+        """Sell ``partial_exit_fraction`` of the open position to lock in profits.
+
+        Called automatically when unrealised profit ≥ ``partial_exit_trigger_pct``.
+        Only fires once per entry (tracked via ``_partial_exit_done``).
+        The remaining position continues running under ATR trailing stop.
+
+        Skipped when:
+        - Remaining EUR value after the sell would be below ``partial_exit_min_remaining_eur``
+        - Sell volume is below the pair minimum
+        """
+        try:
+            full_volume = self.holdings.get(pair, 0.0)
+            min_vol = self._get_min_volume(pair)
+            if full_volume < min_vol:
+                self._partial_exit_done[pair] = True
+                return
+
+            sell_volume = round(full_volume * self.partial_exit_fraction, 8)
+            remaining_volume = full_volume - sell_volume
+
+            # Guard: don't leave a dust position
+            if remaining_volume * price < self.partial_exit_min_remaining_eur:
+                self.logger.info(
+                    f"PARTIAL EXIT skipped for {pair}: remaining would be "
+                    f"{remaining_volume * price:.2f} EUR < {self.partial_exit_min_remaining_eur:.2f} EUR minimum"
+                )
+                self._partial_exit_done[pair] = True
+                return
+            if sell_volume < min_vol:
+                self.logger.info(
+                    f"PARTIAL EXIT skipped for {pair}: sell volume {sell_volume:.8f} < min {min_vol}"
+                )
+                self._partial_exit_done[pair] = True
+                return
+
+            avg_entry = self.purchase_prices.get(pair, 0.0)
+            est_profit_pct = self._profit_percent_from_entry(pair, price)
+            est_profit_eur = (price - avg_entry) * sell_volume if avg_entry > 0 else 0.0
+            pp_str = f"{est_profit_pct:.2f}%" if est_profit_pct is not None else "n/a"
+
+            self.logger.info(
+                f"PARTIAL EXIT ({self.partial_exit_fraction * 100:.0f}%): selling "
+                f"{sell_volume:.6f} {pair} @ {price:.4f} EUR  profit={pp_str}  "
+                f"keeping {remaining_volume:.6f}"
+            )
+            result = self._place_live_order(
+                pair=pair, direction='sell', volume=sell_volume, price=price, post_only=True
+            )
+            if result:
+                self._partial_exit_done[pair] = True
+                self._sync_account_state(force_history=True)
+                self.trade_count += 1
+                now_ts = time.time()
+                self.last_trade_at[pair] = now_ts
+                self.last_global_trade_at = now_ts
+                self._save_cooldown_state()
+                self.logger.info(f"PARTIAL EXIT SUCCESS: {result}")
+                self.logger.info(
+                    f"PARTIAL SELL SUMMARY: {pair} {sell_volume:.6f} (~{sell_volume * price:.2f} EUR)"
+                )
+                self.logger.info(f"PARTIAL PNL ESTIMATE {pair}: {est_profit_eur:.2f} EUR ({pp_str})")
+                self._update_trade_metrics(pair, est_profit_eur)
+                fill_price = None
+                try:
+                    if isinstance(result, dict) and 'fill_price' in result:
+                        fill_price = float(result['fill_price'])
+                except Exception:
+                    pass
+                self._journal_trade(
+                    'PARTIAL_SELL', pair, sell_volume, price, est_profit_eur, 'PARTIAL_EXIT',
+                    extra={
+                        'result': result,
+                        'fraction': self.partial_exit_fraction,
+                        'remaining_volume': remaining_volume,
+                        'fill_price': fill_price,
+                    },
+                )
+                print(
+                    f"\n[PARTIAL SELL] {sell_volume:.6f} {pair} (~{sell_volume * price:.2f} EUR) "
+                    f"kept {remaining_volume:.6f} — Trade #{self.trade_count}"
+                )
+                _notifier.send(
+                    f"📊 <b>PARTIAL SELL</b> #{self.trade_count}\n"
+                    f"Pair: {pair}\n"
+                    f"Sold: {sell_volume:.6f}  (~{sell_volume * price:.2f} EUR)\n"
+                    f"Kept: {remaining_volume:.6f}\n"
+                    f"Price: {price:.4f} EUR\n"
+                    f"P&amp;L est.: {est_profit_eur:+.2f} EUR ({pp_str})"
+                )
+            else:
+                self.logger.error(f"PARTIAL EXIT FAILED for {pair}")
+        except Exception as e:
+            self.logger.error(f"Error executing partial exit for {pair}: {e}", exc_info=True)
 
     def _update_regime_cache(self):
         """Update regime cache (risk_on flag) using benchmark pair and mtf scoring."""
@@ -1880,13 +2125,25 @@ class TradingBot:
 
         for pair in self.trade_pairs:
             try:
-                market_data = self.api_client.get_market_data(pair)
-                if market_data:
-                    pair_key = list(market_data.keys())[0]
-                    current_price = float(market_data[pair_key]['c'][0])
+                # Prefer WebSocket price (zero API calls); fall back to REST
+                ws_price = None
+                if self.ws_feed is not None:
+                    try:
+                        ws_price = self.ws_feed.get_price(pair)
+                    except Exception:
+                        ws_price = None
+
+                if ws_price is not None:
+                    current_price = ws_price
                     self.pair_prices[pair] = current_price
                 else:
-                    current_price = self.pair_prices.get(pair, 0)
+                    market_data = self.api_client.get_market_data(pair)
+                    if market_data:
+                        pair_key = list(market_data.keys())[0]
+                        current_price = float(market_data[pair_key]['c'][0])
+                        self.pair_prices[pair] = current_price
+                    else:
+                        current_price = self.pair_prices.get(pair, 0)
 
                 # Seed history from NAS/API OHLC if buffer isn't full yet
                 if len(self.analysis_tool._get_price_history(pair_key)) < self.analysis_tool.max_history:
@@ -2016,6 +2273,24 @@ class TradingBot:
                             self.execute_sell_order(risk_pair, price,
                                                     require_profit_target=_require_tp,
                                                     reason=risk_type)
+
+                    # ── Partial take-profit exit ─────────────────────────────
+                    # Fires ONCE per entry when unrealised profit reaches
+                    # partial_exit_trigger_pct.  The remaining half continues
+                    # under ATR trailing stop.
+                    if self.enable_partial_exit:
+                        for _pp_pair in list(self.trade_pairs):
+                            if self._partial_exit_done.get(_pp_pair):
+                                continue
+                            _pp_qty = self.holdings.get(_pp_pair, 0.0)
+                            if _pp_qty < self._get_min_volume(_pp_pair):
+                                continue
+                            _pp_price = self.pair_prices.get(_pp_pair, 0.0)
+                            if _pp_price <= 0:
+                                continue
+                            _pp_pct = self._profit_percent_from_entry(_pp_pair, _pp_price)
+                            if _pp_pct is not None and _pp_pct >= self.partial_exit_trigger_pct:
+                                self._execute_partial_exit(_pp_pair, _pp_price)
 
                     self._refresh_cashflows_from_ledger()
                     adjusted_pnl = self._adjusted_pnl_eur(current_balance)
@@ -2150,6 +2425,12 @@ class TradingBot:
                                 continue
                             if not self._is_mtf_trend_bullish(best_pair):
                                 self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
+                                continue
+                            if not self._is_ema_trend_bullish(best_pair):
+                                # Log message is emitted inside the method
+                                continue
+                            if not self._is_mtf_macd_buy_aligned(best_pair):
+                                # Log message is emitted inside the method
                                 continue
                             if not self._has_sufficient_volume(best_pair):
                                 continue  # already logged inside
@@ -2354,6 +2635,7 @@ class TradingBot:
                 self.peak_prices[pair] = max(self.peak_prices.get(pair, 0.0), price)
                 if self.entry_timestamps.get(pair) is None:
                     self.entry_timestamps[pair] = int(time.time())
+                self._partial_exit_done[pair] = False  # arm partial exit for this new entry
                 self._sync_account_state(force_history=True)
                 self.logger.info(f"BUY ORDER SUCCESS: {result}")
                 self.logger.info(f"BUY SUMMARY: {pair} {volume:.6f} (~{volume*price:.2f} EUR)")
@@ -2440,6 +2722,7 @@ class TradingBot:
                 self.purchase_prices[pair] = 0.0
                 self.peak_prices[pair] = 0.0
                 self.entry_timestamps[pair] = None
+                self._partial_exit_done[pair] = False  # reset for next trade cycle
                 if pair in self.stop_info:
                     del self.stop_info[pair]
                 self.logger.info(f"SELL ORDER SUCCESS: {result}")

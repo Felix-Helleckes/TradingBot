@@ -5,7 +5,7 @@ secret = ""
 [bot_settings]
 base_currency = "EUR"
 auto_select_pair = true
-loop_interval_seconds = 30
+loop_interval_seconds = 60
 trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
 allocation_per_trade_percent = 15.0
 
@@ -13,11 +13,11 @@ allocation_per_trade_percent = 15.0
 max_drawdown_percent = 10.0
 stop_loss_percent = 2.0
 allocation_per_trade_percent = 15.0
-min_buy_score = 20.0
+min_buy_score = 18.0
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = true
-mr_rsi_oversold_threshold = 28
-mr_rsi_overbought_threshold = 62
+mr_rsi_oversold_threshold = 30
+mr_rsi_overbought_threshold = 68
 enable_regime_filter = true
 regime_benchmark_pair = "XBTEUR"
 regime_min_score = -10.0
@@ -36,14 +36,14 @@ trading_hours_end_utc = 22
 enable_volume_filter = true
 volume_filter_min_ratio = 0.5
 enable_time_stop = true
-time_stop_hours = 36
+time_stop_hours = 24
 enable_daily_drawdown = true
 daily_loss_limit_percent = 5.0
 risk_off_allocation_multiplier = 0.5
 enable_volatility_targeting = true
 target_volatility_pct = 1.6
-max_consecutive_losses = 2
-pause_after_loss_streak_minutes = 180
+max_consecutive_losses = 3
+pause_after_loss_streak_minutes = 60
 take_profit_percent = 5.0
 adaptive_take_profit = true
 max_take_profit_percent = 12.0
@@ -62,18 +62,64 @@ enable_atr_dynamic_tp = true
 atr_tp_multiplier = 2.0
 enable_pyramiding = false
 pyramiding_add_pct = 0.5
-max_open_positions = 5
-trade_cooldown_seconds = 10800
-global_trade_cooldown_seconds = 5400
+max_open_positions = 4
+trade_cooldown_seconds = 3600
+global_trade_cooldown_seconds = 1800
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 10.0
 min_free_margin_buffer = 5.0
 max_notional_per_side = 25.0
 max_open_positions_per_side = 12
-enable_parallel_caps = true
+enable_parallel_caps = false
 min_auto_scale_notional = 0.2
 aggressive_autoscale = true
 dynamic_notional_fraction = 0.25
+
+[execution]
+# How often (seconds) to recompute signals from 1h OHLC.
+# 300 s = every 5 min — avoids noisy tick-level signals while staying responsive.
+signal_refresh_interval_seconds = 300
+# How long (seconds) to cache the regime (RISK_ON/OFF) result.
+# Regime changes slowly; 600 s is safe and saves OHLC API calls.
+regime_cache_ttl_seconds = 600
+# Post-only (maker) limit order timeout before falling back to market order.
+enable_live_limit_fallback = true
+limit_fallback_timeout_sec = 30
+# Spread and depth guards for BUY preflight
+max_spread_pct = 0.5
+min_book_fill_ratio = 0.5
+
+# ── WebSocket feed ────────────────────────────────────────────────────────────
+# Uses Kraken WebSocket v2 for real-time last-prices (no REST call per tick).
+# Falls back to REST Ticker polling automatically when the connection drops
+# or when the cached WS price is older than 90 seconds.
+[websocket]
+enable_ws_feed = true
+
+# ── Technical indicators / filters ───────────────────────────────────────────
+[technical]
+# EMA crossover trend filter
+# Blocks new BUYs when the fast EMA is below the slow EMA on the 1h chart.
+# Keeps the bot out of clearly downtrending markets.
+enable_ema_crossover_filter = true
+ema_fast_period = 9   # fast EMA period (1h candles)
+ema_slow_period = 21  # slow EMA period (1h candles)
+
+# Multi-timeframe MACD confirmation
+# Blocks new BUYs only when BOTH the 1h AND 15m MACD histograms are negative
+# (confirmed bearish momentum on two timeframes).
+# Using BOTH avoids false blocks during sideways/consolidation phases.
+enable_mtf_macd_filter = true
+
+# Partial take-profit exit
+# When unrealised profit reaches partial_exit_trigger_pct, sells
+# partial_exit_fraction of the position to lock in gains.
+# The remaining position continues under the ATR trailing stop.
+# Fires only once per entry cycle.
+enable_partial_exit = true
+partial_exit_trigger_pct = 4.0       # trigger when profit ≥ this % (default 4 %)
+partial_exit_fraction = 0.5          # sell this fraction (0.5 = 50 %)
+partial_exit_min_remaining_eur = 5.0 # skip partial exit if remainder < this EUR value
 
 [daytrading]
 enable_daytrading = true
@@ -113,13 +159,6 @@ generate_trade_reports = true
 report_output_path = "reports/"
 cashflow_refresh_seconds = 60
 
-[execution]
-enable_live_limit_fallback = true
-limit_fallback_timeout_sec = 30
-default_execution_mode = "immediate"
-default_twap_slices = 3
-default_slippage_model = "fixed"
-
 [alerts]
 notify_on = [ "trade", "error",]
 notify_channel = "telegram"
@@ -144,6 +183,6 @@ SOLEUR = 0.02
 XXRPZEUR = 5.0
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 50.0
+trade_amount_eur = 20.0
 initial_balance = 100.0
 target_balance_eur = 10000.0

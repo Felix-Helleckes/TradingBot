@@ -3,4 +3,5 @@ toml==0.10.2
 numpy
 pandas
 python-dotenv==1.0.0
+websockets>=10.0
 

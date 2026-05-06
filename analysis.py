@@ -63,6 +63,10 @@ class TechnicalAnalysis:
         self.enable_trend_signals = True # trend/breakout: Bollinger Band momentum
         self.mr_rsi_buy = 33.0           # RSI <= threshold triggers mean-reversion BUY
         self.mr_rsi_sell = 67.0          # RSI >= threshold triggers mean-reversion SELL
+        # Throttle history saves: only flush to disk every 5 minutes to reduce
+        # SD card wear on Raspberry Pi (4 pairs × every 60 s = ~240 writes/hr otherwise)
+        self._last_save_ts = 0.0
+        self._save_interval_sec = 300.0
         self._load_history()
 
     def _get_price_history(self, pair):
@@ -81,8 +85,17 @@ class TechnicalAnalysis:
         except Exception as e:
             self.logger.error(f"Error loading price history buffer: {e}")
 
-    def _save_history(self):
-        """Atomically write price history so a crash/power-loss never leaves a corrupted file."""
+    def _save_history(self, force: bool = False):
+        """Atomically write price history so a crash/power-loss never leaves a corrupted file.
+
+        Throttled to at most once every ``_save_interval_sec`` seconds (default 5 min)
+        to reduce SD card writes on Raspberry Pi.  Pass ``force=True`` for one-time
+        seeding calls where we must persist immediately.
+        """
+        import time as _time
+        now = _time.time()
+        if not force and (now - self._last_save_ts) < self._save_interval_sec:
+            return
         try:
             import tempfile
             os.makedirs(os.path.dirname(self.buffer_path), exist_ok=True)
@@ -99,6 +112,7 @@ class TechnicalAnalysis:
                 except OSError:
                     pass
                 raise
+            self._last_save_ts = now
         except Exception as e:
             self.logger.error(f"Error saving price history buffer: {e}")
 
@@ -152,12 +166,12 @@ class TechnicalAnalysis:
                 history.append(c)
             for c in existing:
                 history.append(c)
-            self._save_history()
+            self._save_history(force=True)
             self.logger.info(f"[NAS seed] {pair}: prepended {len(nas_closes)} closes → buffer={len(history)}/{self.max_history}")
         except Exception as e:
             self.logger.warning(f"[NAS seed] {pair}: failed to seed from {csv_path}: {e}")
 
-
+    def seed_from_ohlc(self, pair, closes):
         """Pre-populate price history from OHLC candle closes.
         Only seeds if the current history is too sparse for reliable signals.
         """
@@ -166,8 +180,68 @@ class TechnicalAnalysis:
             return  # already warmed up
         for c in closes[-self.max_history:]:
             history.append(float(c))
-        self._save_history()
+        self._save_history(force=True)
         self.logger.info(f"[OHLC seed] {pair}: seeded {len(history)} closes from 15m candles")
+
+    def calculate_ema_crossover(self, prices, fast=9, slow=21):
+        """Compute EMA crossover to determine trend direction.
+
+        Uses two Exponential Moving Averages on the provided price series:
+        - fast EMA (default 9-period) is more reactive to recent price action
+        - slow EMA (default 21-period) represents the baseline trend
+
+        Returns (fast_ema, slow_ema, is_bullish) where:
+        - is_bullish = True  when fast EMA > slow EMA  (uptrend / buy side)
+        - is_bullish = False when fast EMA < slow EMA  (downtrend / avoid buys)
+        Returns (None, None, None) when there is insufficient history.
+        """
+        if len(prices) < slow + 1:
+            return None, None, None
+
+        arr = [float(p) for p in prices]
+
+        def _ema(data, period):
+            k = 2.0 / (period + 1)
+            result = [data[0]]
+            for p in data[1:]:
+                result.append(p * k + result[-1] * (1 - k))
+            return result
+
+        fast_arr = _ema(arr, fast)
+        slow_arr = _ema(arr, slow)
+        fast_val = fast_arr[-1]
+        slow_val = slow_arr[-1]
+        return fast_val, slow_val, fast_val > slow_val
+
+    def calculate_macd(self, prices, fast=12, slow=26, signal_period=9):
+        """Calculate MACD line, signal line, and histogram from a price series.
+
+        Returns (macd, signal, histogram) floats, or (None, None, None) when there
+        is insufficient history.  All three are the *current* (last) values.
+
+        MACD > 0 and rising  -> bullish momentum
+        MACD < 0 and falling -> bearish momentum (avoid buying)
+        Histogram sign change -> early momentum reversal signal
+        """
+        min_len = slow + signal_period
+        if len(prices) < min_len:
+            return None, None, None
+        arr = np.array(prices, dtype=float)
+
+        def _ema(a, period):
+            k = 2.0 / (period + 1)
+            out = np.empty(len(a))
+            out[0] = a[0]
+            for i in range(1, len(a)):
+                out[i] = a[i] * k + out[i - 1] * (1 - k)
+            return out
+
+        ema_fast = _ema(arr, fast)
+        ema_slow = _ema(arr, slow)
+        macd_line = ema_fast - ema_slow
+        signal_line = _ema(macd_line, signal_period)
+        histogram = macd_line - signal_line
+        return float(macd_line[-1]), float(signal_line[-1]), float(histogram[-1])
 
     def calculate_rsi(self, prices):
         """Compute the Relative Strength Index over the last ``rsi_period`` values.
@@ -230,7 +304,7 @@ class TechnicalAnalysis:
             close_price = float(pair_data['c'][0])
             price_history = self._get_price_history(pair_key)
             price_history.append(close_price)
-            self._save_history()
+            self._save_history()  # throttled to every 5 min (SD card wear protection)
 
             if len(price_history) < self.sma_long:
                 return "HOLD", 0
@@ -324,6 +398,46 @@ class TechnicalAnalysis:
                     score += min(8.0, (atr / max(1e-6, sma20)) * 100.0)
                 if current_price < lower_bb and willr > -80:
                     score -= min(8.0, (atr / max(1e-6, sma20)) * 100.0)
+
+            # --- MACD momentum filter ---
+            # MACD confirms or dampens the existing signal based on momentum direction.
+            # We do NOT block trades entirely here (that's the regime filter's job) but
+            # we adjust the score so the signal is only acted on when momentum agrees:
+            #   BUY  + MACD bearish  → score penalty (risk of catching falling knife)
+            #   SELL + MACD bullish  → score penalty (risk of selling too early)
+            #   Aligned momentum     → score boost
+            try:
+                if len(prices) >= 35:  # need at least slow(26) + signal(9)
+                    macd_val, macd_sig, macd_hist = self.calculate_macd(list(prices))
+                    if macd_val is not None and macd_hist is not None:
+                        # Compute histogram trend: compare last two histogram values
+                        _, _, hist_prev = self.calculate_macd(list(prices[:-1])) if len(prices) > 35 else (None, None, None)
+                        hist_rising = (hist_prev is not None) and (macd_hist > hist_prev)
+
+                        if signal == "BUY":
+                            if macd_hist < 0:
+                                # MACD histogram negative = bearish momentum: penalise BUY
+                                penalty = min(12.0, abs(macd_hist) / max(1e-6, abs(current_price)) * 100.0 * 500)
+                                score -= penalty
+                            elif hist_rising and macd_hist > 0:
+                                # MACD histogram positive and rising = accelerating bullish momentum
+                                boost = min(6.0, macd_hist / max(1e-6, abs(current_price)) * 100.0 * 300)
+                                score += boost
+
+                        elif signal == "SELL":
+                            if macd_hist > 0:
+                                # MACD histogram positive = still bullish: penalise premature SELL
+                                penalty = min(12.0, abs(macd_hist) / max(1e-6, abs(current_price)) * 100.0 * 500)
+                                score += penalty  # score is negative for SELL; adding makes it less negative
+                            elif not hist_rising and macd_hist < 0:
+                                # MACD histogram negative and falling = confirmed bearish momentum
+                                boost = min(6.0, abs(macd_hist) / max(1e-6, abs(current_price)) * 100.0 * 300)
+                                score -= boost
+            except Exception:
+                pass  # MACD is a soft filter; never block on indicator failure
+
+            # Final cap after all adjustments
+            score = max(-50.0, min(50.0, score))
 
             return signal, score
 
