@@ -2125,6 +2125,8 @@ class TradingBot:
 
         for pair in self.trade_pairs:
             try:
+                # Ensure pair_key is always defined (fallback when using WS prices)
+                pair_key = pair
                 # Prefer WebSocket price (zero API calls); fall back to REST
                 ws_price = None
                 if self.ws_feed is not None:
@@ -2625,8 +2627,50 @@ class TradingBot:
                 self.logger.warning(f"Preflight checks failed for BUY {pair}: {e}")
                 return
 
+            prev_qty = self.holdings.get(pair, 0.0)
             result = self._place_live_order(pair=pair, direction='buy', volume=volume, price=price, post_only=True)
             if result:
+                # Wait for confirmation that the fill landed (or fallback provided a fill_price)
+                confirmed = False
+                fill_price = None
+                try:
+                    if isinstance(result, dict) and 'fill_price' in result:
+                        fill_price = float(result.get('fill_price'))
+                        confirmed = True
+                    elif isinstance(result, dict) and result.get('simulated'):
+                        # paper mode may include simulated fill_price
+                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
+                        confirmed = True
+                except Exception:
+                    fill_price = None
+                # Poll account state for up to 15s to confirm holdings changed
+                if not confirmed:
+                    timeout = 15
+                    waited = 0
+                    while waited < timeout:
+                        time.sleep(1)
+                        waited += 1
+                        try:
+                            self._sync_account_state(force_history=True)
+                        except Exception:
+                            pass
+                        new_qty = self.holdings.get(pair, 0.0)
+                        if new_qty - prev_qty >= (volume * 0.95):
+                            confirmed = True
+                            break
+                        # if there is an open order, continue waiting
+                        if self._has_open_order(pair, 'buy'):
+                            continue
+                    # end poll
+                if not confirmed:
+                    # Treat as pending/unfilled; do not journal state changes
+                    remaining = self.holdings.get(pair, 0.0)
+                    self.logger.warning(
+                        f"BUY order for {pair} accepted but not confirmed (prev={prev_qty:.8f} now={remaining:.8f}). Skipping journal/state update."
+                    )
+                    return
+
+                # Confirmed — now update state and journal
                 self.trade_count += 1
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
@@ -2646,16 +2690,6 @@ class TradingBot:
                         init_stop = max(0.0, price - (atr * self.atr_multiplier))
                         self.stop_info[pair] = {'stop_price': init_stop, 'type': 'ATR'}
                         self.logger.info(f"Initialized ATR stop for {pair}: {init_stop:.4f} (atr={atr:.4f})")
-                # journal buy
-                # attempt to capture fill price (paper mode provides 'fill_price')
-                fill_price = None
-                try:
-                    if isinstance(result, dict) and 'fill_price' in result:
-                        fill_price = float(result.get('fill_price'))
-                    elif isinstance(result, dict) and result.get('simulated'):
-                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
-                except Exception:
-                    fill_price = None
                 self._journal_trade('BUY', pair, volume, price, 0.0, 'BUY_EXECUTED', extra={'result': result, 'expected_price': price, 'fill_price': fill_price})
                 print(f"\n[BUY] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 _notifier.send(
@@ -2703,17 +2737,45 @@ class TradingBot:
             est_profit_eur = (price - avg_entry) * volume if avg_entry > 0 else 0.0
 
             self.logger.info(f"Placing SELL order (MAKER/POST-ONLY): {volume:.6f} {pair} at {price:.2f} EUR")
+            prev_qty = self.holdings.get(pair, 0.0)
             result = self._place_live_order(pair=pair, direction='sell', volume=volume, price=price, post_only=True)
             if result:
-                self._sync_account_state(force_history=True)
-                remaining_volume = self.holdings.get(pair, 0.0)
-                if remaining_volume >= min_vol * 0.95 or self._has_open_order(pair, 'sell'):
+                # Wait briefly for the exchange to reflect the sell (or for a provided fill_price)
+                confirmed = False
+                fill_price = None
+                try:
+                    if isinstance(result, dict) and 'fill_price' in result:
+                        fill_price = float(result.get('fill_price'))
+                        confirmed = True
+                    elif isinstance(result, dict) and result.get('simulated'):
+                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
+                        confirmed = True
+                except Exception:
+                    fill_price = None
+                if not confirmed:
+                    timeout = 15
+                    waited = 0
+                    while waited < timeout:
+                        time.sleep(1)
+                        waited += 1
+                        try:
+                            self._sync_account_state(force_history=True)
+                        except Exception:
+                            pass
+                        remaining_volume = self.holdings.get(pair, 0.0)
+                        if prev_qty - remaining_volume >= (volume * 0.95):
+                            confirmed = True
+                            break
+                        # if open sell orders still present, keep waiting
+                        if self._has_open_order(pair, 'sell'):
+                            continue
+                if not confirmed:
                     self.logger.warning(
-                        f"SELL order for {pair} was accepted but position still exists "
-                        f"(remaining={remaining_volume:.8f}). Treating as pending/unfilled; skipping journal/state clear."
+                        f"SELL order for {pair} accepted but not confirmed (prev={prev_qty:.8f} now={self.holdings.get(pair,0.0):.8f}). Skipping journal/state update."
                     )
                     return
 
+                # Confirmed — apply state updates and journal
                 self.trade_count += 1
                 now_ts = time.time()
                 self.last_trade_at[pair] = now_ts
@@ -2731,15 +2793,6 @@ class TradingBot:
                     f"SELL PNL ESTIMATE {pair}: {est_profit_eur:.2f} EUR ({est_profit_pct if est_profit_pct is not None else 0:.2f}%)"
                 )
                 self._update_trade_metrics(pair, est_profit_eur)
-                # attempt to capture fill price
-                fill_price = None
-                try:
-                    if isinstance(result, dict) and 'fill_price' in result:
-                        fill_price = float(result.get('fill_price'))
-                    elif isinstance(result, dict) and result.get('simulated'):
-                        fill_price = float(result.get('fill_price')) if result.get('fill_price') else price
-                except Exception:
-                    fill_price = None
                 self._journal_trade('SELL', pair, volume, price, est_profit_eur, reason or 'SELL_EXECUTED', extra={'result': result, 'expected_price': price, 'fill_price': fill_price})
                 print(f"\n[SELL] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 pnl_sign = "🟢" if est_profit_eur >= 0 else "🔴"
