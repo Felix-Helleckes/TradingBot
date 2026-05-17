@@ -61,3 +61,7 @@ scripts/_tmp_*.py
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Local config (sensitive)
+config.toml
+config.paper.toml
