@@ -283,6 +283,9 @@ class TradingBot:
 
         # Initialise dicts used by _init_pair_state BEFORE it is called
         self._ema_bullish = {}
+        # cache for 1h RSI and SMA200 used by simplified mean-reversion signals and exits
+        self._rsi_1h = {}
+        self._sma200_1h = {}
         self._macd_1h_hist = {}
         self._macd_15m_hist = {}
         self._macd_15m_hist_prev = {}
@@ -1780,6 +1783,14 @@ class TradingBot:
                             if potential_stop > current_stop:
                                 self.stop_info[pair] = {'stop_price': potential_stop, 'type': 'ATR_TRAIL'}
 
+                    # RSI-based Exit: if hourly RSI has recovered above overbought threshold, take profit
+                    try:
+                        rsi_cached = self._rsi_1h.get(pair)
+                        if rsi_cached is not None and float(rsi_cached) >= float(self.mr_rsi_overbought):
+                            return pair, "TAKE_PROFIT_RSI", change_percent
+                    except Exception:
+                        pass
+
                     # Exit Check 1: ATR/Trailing/Break-Even Stops
                     stop_data = self.stop_info.get(pair, {})
                     s_price = stop_data.get('stop_price')
@@ -1878,9 +1889,32 @@ class TradingBot:
                     continue
                 closes_1h = [float(row[4]) for row in series]
 
-                # Signal & score
+                # Compute last close, RSI(14) and SMA200 on 1h series
                 last_close = closes_1h[-1]
+                try:
+                    rsi_val = self.analysis_tool.calculate_rsi(closes_1h)
+                except Exception:
+                    rsi_val = None
+                sma200 = None
+                if len(closes_1h) >= 200:
+                    sma200 = sum(closes_1h[-200:]) / 200.0
+
+                # Store caches for exit checks later
+                self._rsi_1h[pair] = rsi_val
+                self._sma200_1h[pair] = sma200
+
+                # Default signal via analysis tool (fallback)
                 signal, score = self.analysis_tool.generate_signal_with_score({pair: {'c': [last_close]}})
+
+                # Simplified mean-reversion override: RSI < oversold && price > SMA200 -> BUY
+                if self.enable_mr_signals and rsi_val is not None and sma200 is not None:
+                    try:
+                        if float(rsi_val) < float(self.mr_rsi_oversold) and float(last_close) > float(sma200):
+                            signal = 'BUY'
+                            score = 30.0
+                    except Exception:
+                        pass
+
                 self.pair_signals[pair] = signal
                 self.pair_scores[pair] = score
 

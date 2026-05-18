@@ -15,7 +15,7 @@ API_SECRET=os.getenv('KRAKEN_API_SECRET')
 api=API(API_KEY, API_SECRET)
 
 # Config
-MIN_PROFIT_PCT = 3.0    # user-specified base percent
+MIN_PROFIT_PCT = 0.2    # user-specified base percent (lowered to pick small netto wins)
 FEE_RATE = 0.002       # assumed taker fee (0.2%) for closing
 REQUIRED_PCT = MIN_PROFIT_PCT + (FEE_RATE*100)
 MIN_NOTIONAL_EUR = 1.0 # don't attempt to close tiny positions
@@ -76,7 +76,7 @@ def compute_pnl_pct(pos, tickers):
 
 def close_position(pair, vol):
     # market buy to close short
-    params = {'pair': pair, 'type': 'buy', 'ordertype': 'market', 'volume': str(vol)}
+    params = {'pair': pair, 'type': 'buy', 'ordertype': 'market', 'volume': str(vol), 'reduce_only': 'true'}
     with acquire_order_lock(timeout_seconds=5.0) as locked:
         if not locked:
             return {'error': ['order lock busy']}

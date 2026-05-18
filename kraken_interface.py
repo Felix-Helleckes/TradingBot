@@ -738,7 +738,21 @@ class KrakenAPI:
                     # order not found among open orders -> likely filled
                     self.logger.info(f"Order {txid} no longer open (likely filled)")
                     return order
-            # timeout reached, cancel and send market order
+            # timeout reached
+            # Check config: if user prefers pure maker flow, do not auto-fallback to market
+            prefer_maker_only = False
+            try:
+                cfg_path = os.path.join(os.path.dirname(__file__), 'config.toml')
+                if os.path.exists(cfg_path):
+                    exec_cfg = toml.load(cfg_path).get('execution', {})
+                    prefer_maker_only = bool(exec_cfg.get('prefer_maker_only', False))
+            except Exception:
+                pass
+
+            if prefer_maker_only:
+                self.logger.info(f"Timeout waiting for order {txid}; prefer_maker_only enabled — leaving limit order open")
+                return order
+
             self.logger.info(f"Timeout waiting for order {txid}; cancelling and placing market order")
             try:
                 self.cancel_order(txid)
