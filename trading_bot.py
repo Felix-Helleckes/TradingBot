@@ -2000,6 +2000,47 @@ class TradingBot:
             return False
         return True
 
+    def _auto_cancel_old_maker_orders(self):
+        """Cancel post-only/maker orders older than configured threshold (hours).
+
+        Scans open orders and cancels those whose order flags include 'post' (post-only)
+        and which have been open longer than execution.maker_order_auto_cancel_hours.
+        """
+        try:
+            exec_cfg = self.config.get('execution', {}) if isinstance(self.config, dict) else {}
+            hours = int(exec_cfg.get('maker_order_auto_cancel_hours', 0))
+            if hours <= 0:
+                return
+            now = time.time()
+            open_orders = self.api_client.get_open_orders() or {}
+            open_map = open_orders.get('open', open_orders) if isinstance(open_orders, dict) else open_orders
+            if not open_map:
+                return
+            cancelled = 0
+            for txid, order in list(open_map.items()):
+                try:
+                    descr = order.get('descr', {}) if isinstance(order, dict) else {}
+                    oflags = (descr.get('oflags') or order.get('oflags') or '')
+                    if not oflags or 'post' not in str(oflags):
+                        continue
+                    opentm = float(order.get('opentm') or descr.get('opentm') or 0)
+                    if opentm <= 0:
+                        continue
+                    age_hours = (now - opentm) / 3600.0
+                    if age_hours >= hours:
+                        self.logger.info(f"Auto-cancel: cancelling maker order {txid} (age {age_hours:.1f}h >= {hours}h)")
+                        try:
+                            self.api_client.cancel_order(txid)
+                            cancelled += 1
+                        except Exception as _e:
+                            self.logger.debug(f"Auto-cancel failed for {txid}: {_e}")
+                except Exception:
+                    continue
+            if cancelled > 0:
+                self.logger.info(f"Auto-cancel: cancelled {cancelled} old maker order(s)")
+        except Exception as e:
+            self.logger.debug(f"_auto_cancel_old_maker_orders error: {e}")
+
     def _execute_partial_exit(self, pair, price):
         """Sell ``partial_exit_fraction`` of the open position to lock in profits.
 
@@ -2393,6 +2434,12 @@ class TradingBot:
                             metric_parts.append(f"{p}: WR {winrate:.0f}% avg {avg_pnl:.2f}EUR")
                         if metric_parts:
                             self.logger.info("METRICS | " + " | ".join(metric_parts))
+
+                        # Periodic housekeeping: auto-cancel old maker/post-only orders if configured
+                        try:
+                            self._auto_cancel_old_maker_orders()
+                        except Exception as _ac:
+                            self.logger.debug(f"Auto-cancel check failed: {_ac}")
 
                     # ── Bear Shield: check 4h trend and park in FIAT if confirmed downtrend ──
                     if self.enable_bear_shield:
