@@ -63,5 +63,5 @@ scripts/_tmp_*.py
 Thumbs.db
 
 # Local config (sensitive)
-config.toml
-config.paper.toml
+# config.toml
+# config.paper.toml
