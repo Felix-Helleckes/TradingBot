@@ -1,0 +1,13 @@
+{
+  "total_return": null,
+  "sharpe": null,
+  "max_dd": null,
+  "trades": null,
+  "output": "Backtesting mode activated.\nTotal Return: -0.02%\nSharpe Ratio: -0.00\nSortino Ratio: -0.00\nMax Drawdown: 0.69%\nTotal Trades: 0\nWin Rate: N/A\n",
+  "params": {
+    "min_buy_score": 4.0,
+    "take_profit_percent": 2.0,
+    "hard_stop_loss_percent": 1.5,
+    "atr_multiplier": 1.0
+  }
+}

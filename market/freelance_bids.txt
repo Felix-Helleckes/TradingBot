@@ -1,0 +1,33 @@
+Upwork / Remote Dev Bid (short)
+
+Titel: Python/TradingBot Backtests & Automatisierung — schnelle Lieferung
+
+Hi — ich bin Felix' technischer Partner (Trading‑Automation). Ich liefere in 48h:
+- Reproduzierbaren Backtest mit deinen Parametern
+- Handlungsempfehlung (deploy‑ready) oder sichere Pilot‑Deploy‑Option
+Preis: 80–150€ je Task (abhängig vom Umfang). Ich starte sofort, wenn du mir Zugang zu historischen Daten gibst.
+
+Kurze Referenz: Automatisierter Kraken‑Trading‑Bot, stündliche Grid/W‑F Runs, CI + auto‑deploy workflow.
+
+—
+LinkedIn / Direct Message Pitch (short)
+
+Betreff: Schnelle Trading‑Bot Hilfe — Backtests & Live‑Pilot in 48h
+
+Hi NAME — ich kann dir in 48 Stunden einen sauberen Backtest liefern und optional einen kleinen Live‑Pilot mit strengen Risk‑Caps aufsetzen. Preis: Fix 120€ (Backtest + short report). Wenn interessiert, schicke Zugangsdaten/CSV.
+
+—
+Fiverr / Gig Description (short)
+
+Gig: Ich liefere einen sauberen Backtest + Trade‑Report (48h)
+
+Was du bekommst:
+- Backtest (14–30 Tage) mit realistischen Gebühren & Slippage
+- Top‑3 Parametervorschläge und Risiko‑Empfehlung
+- Klarer Deploy‑Plan (safe pilot)
+
+Delivery: 48 Stunden. Preis: 99€ (Basic).
+
+
+
+Instructions: Use these templates to post and reply quickly. Edit names/prices as you like.

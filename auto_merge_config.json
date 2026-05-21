@@ -1,0 +1,1 @@
+{"auto_merge": true, "mode": "permanent", "criteria": "backtest_improvement", "min_net_pct": 5.0, "sharpe_delta": 0.1, "auto_deploy": true, "deploy_safeguards": {"no_open_trades": true, "backup_tag": true, "cooldown_minutes": 60, "monitor_24h": true, "rollback_on_loss_pct": -3.0}}

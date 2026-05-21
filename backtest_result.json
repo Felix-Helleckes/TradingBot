@@ -1,0 +1,8 @@
+{
+  "total_return_pct": -0.02,
+  "sharpe": -0.0,
+  "sortino": -0.0,
+  "max_drawdown_pct": 0.68,
+  "total_trades": 0,
+  "raw": "Backtesting mode activated.\nTotal Return: -0.02%\nSharpe Ratio: -0.00\nSortino Ratio: -0.00\nMax Drawdown: 0.68%\nTotal Trades: 0\nWin Rate: N/A\n"
+}

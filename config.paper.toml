@@ -1,0 +1,52 @@
+# Paper canary config (copy of config.toml with small allocation for paper testing)
+
+[kraken_api]
+key = ""
+secret = ""
+
+[bot_settings]
+base_currency = "EUR"
+auto_select_pair = true
+loop_interval_seconds = 60
+trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
+allocation_per_trade_percent = 3.0
+
+[risk_management]
+max_drawdown_percent = 10.0
+stop_loss_percent = 2.0
+allocation_per_trade_percent = 3.0
+min_buy_score = 18.0
+# keep other settings same as main config
+
+[execution]
+signal_refresh_interval_seconds = 300
+regime_cache_ttl_seconds = 600
+
+[technical]
+enable_ema_crossover_filter = true
+ema_fast_period = 9
+ema_slow_period = 21
+
+[logging]
+log_level = "INFO"
+log_to_file = true
+log_file_path = "logs/bot_activity_paper.log"
+
+[backtesting]
+historical_data_path = "data/historical_prices.csv"
+results_output_path = "backtest_results/"
+
+[reporting]
+generate_trade_reports = true
+report_output_path = "reports/"
+
+[paths]
+nas_root = "/mnt/fritz_nas/Volume/kraken"
+
+[telegram]
+bot_token = ""
+chat_id = ""
+
+[bot_settings.trade_amounts]
+trade_amount_eur = 20.0
+initial_balance = 100.0
