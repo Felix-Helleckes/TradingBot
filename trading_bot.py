@@ -584,7 +584,16 @@ class TradingBot:
         return min(base_amount * 1.5, amount, available_eur * 0.95)
 
     def _is_mtf_trend_bullish(self, pair):
-        """Check 1h timeframe to confirm bullish trend."""
+        """Check 1h timeframe to confirm bullish trend.
+
+        Behaviour change: prefer local cached history when the OHLC API is
+        unavailable or returns no data. Previously the function was "fail-closed"
+        (return False), which could indefinitely block buys during transient
+        API failures or rate limits. New behaviour:
+          - If API returns no data, try local buffer via analysis_tool.pair_price_history
+          - If no local history is available, fall back to fail-open (return True)
+            to avoid permanently blocking trading due to transient infra issues.
+        """
         try:
             # Use cached regime data if fresh to avoid extra API calls
             now = time.time()
@@ -596,17 +605,30 @@ class TradingBot:
                     return self.analysis_tool.check_mtf_trend(closes)
 
             ohlc = self.api_client.get_ohlc_data(pair, interval=60) # 1h
-            if not ohlc:
-                return False # Fail-closed: block trade if we cannot verify trend
-            data_key = next((k for k in ohlc if k != 'last'), None)
-            if not data_key:
-                return False
+            data_key = next((k for k in ohlc if k != 'last'), None) if ohlc else None
+            if not ohlc or not data_key:
+                # API returned no data — fallback to local buffer if available,
+                # otherwise fail-open (allow trading) to avoid permanent blocks
+                self.logger.warning(f"MTF check: no OHLC from API for {pair}; falling back to local history if available")
+                local = self.analysis_tool.pair_price_history.get(pair)
+                if local:
+                    return self.analysis_tool.check_mtf_trend(list(local))
+                return True
+
             # Kraken returns [time, open, high, low, close, vwap, volume, count]
             closes = [float(row[4]) for row in ohlc[data_key]]
             return self.analysis_tool.check_mtf_trend(closes)
         except Exception as e:
             self.logger.error(f"MTF check failed for {pair}: {e}")
-            return False
+            # Exception occurred — attempt to use local cached history before failing open
+            local = self.analysis_tool.pair_price_history.get(pair)
+            if local:
+                try:
+                    return self.analysis_tool.check_mtf_trend(list(local))
+                except Exception:
+                    pass
+            # As a last resort, allow trading (fail-open) to avoid blocking due to transient errors
+            return True
 
     def _get_min_volume(self, pair):
         try:
