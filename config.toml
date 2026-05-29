@@ -114,7 +114,9 @@ loss_streak_pause_minutes = 60
 # Per-symbol overrides. Example:
 # [symbols.DOTEUR]
 # intraday_sl_percent = 2.5
-# intraday_tp_percent = 3.0
+[symbols.DOTEUR]
+intraday_sl_percent = 2.5
+intraday_tp_percent = 3.0
 
 
 [bear_shield]
