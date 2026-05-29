@@ -1,3 +1,1 @@
-Traceback (most recent call last):
-  File "<stdin>", line 3, in <module>
-FileNotFoundError: [Errno 2] No such file or directory: '$OUT'
+<stdin>:22: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
