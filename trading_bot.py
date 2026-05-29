@@ -179,6 +179,25 @@ class TradingBot:
         self.stop_info = {}
         # journaling path
         self.journal_path = os.path.join(os.path.dirname(__file__), 'reports', 'trade_journal.csv')
+
+        # Start a watchdog heartbeat thread to reliably send WATCHDOG=1 pings
+        # This prevents systemd watchdog kills when the main loop blocks on I/O.
+        try:
+            import threading
+            self._watchdog_interval = int(self.config.get('bot_settings', {}).get('watchdog_heartbeat_seconds', 60))
+            def _watchdog_loop():
+                while True:
+                    try:
+                        _sd_notify_watchdog()
+                    except Exception:
+                        pass
+                    time.sleep(self._watchdog_interval)
+            # only start if systemd provides a NOTIFY_SOCKET
+            if os.environ.get('NOTIFY_SOCKET'):
+                t = threading.Thread(target=_watchdog_loop, name='watchdog-heartbeat', daemon=True)
+                t.start()
+        except Exception:
+            pass
         # structured JSONL trade log for observability
         self.json_journal_path = os.path.join(os.path.dirname(__file__), 'logs', 'trade_events.jsonl')
         os.makedirs(os.path.dirname(self.json_journal_path), exist_ok=True)
@@ -1434,25 +1453,45 @@ class TradingBot:
 
     def _daily_drawdown_hit(self):
         # If disabled via config, never trigger the daily drawdown circuit
+        # Compute drawdown against the full portfolio value (cash + holdings + reserved buys)
         if not getattr(self, 'enable_daily_drawdown', True):
             return False
 
-        current = self.get_eur_balance()
+        # Build current portfolio snapshot in a best-effort way
+        try:
+            current_cash = self.get_eur_balance()
+            holdings_value = sum(
+                float(self.holdings.get(p, 0.0)) * float(self.pair_prices.get(p, 0.0))
+                for p in self.trade_pairs
+            )
+            reserved_buy_eur = 0.0
+            try:
+                reserved_buy_eur = float(self._estimate_open_buy_reserve_eur())
+            except Exception:
+                reserved_buy_eur = 0.0
+            portfolio_value = current_cash + holdings_value + reserved_buy_eur
+        except Exception:
+            # Fail-safe: fall back to EUR cash only
+            portfolio_value = float(self.get_eur_balance())
+
+        # Initialise daily baseline on first call
         if self.daily_start_balance is None:
-            self.daily_start_balance = current
+            self.daily_start_balance = portfolio_value
             return False
         if self.daily_start_balance <= 0:
             return False
 
-        # Compute percentage drawdown relative to daily start
-        dd = ((self.daily_start_balance - current) / self.daily_start_balance) * 100
+        # Percentage drawdown relative to the daily baseline
+        dd = ((self.daily_start_balance - portfolio_value) / self.daily_start_balance) * 100.0
 
-        # Allow bypass for small absolute losses: require either percentage exceed or absolute EUR loss > threshold
-        abs_loss = max(0.0, self.daily_start_balance - current)
+        # Absolute loss threshold bypass
+        abs_loss = max(0.0, self.daily_start_balance - portfolio_value)
         min_abs_loss = float(self.config.get('risk_management', {}).get('daily_loss_min_eur', 0.0))
 
         if dd >= self.daily_drawdown_percent and abs_loss >= min_abs_loss:
-            self.logger.warning(f"Daily drawdown limit reached: {dd:.2f}% >= {self.daily_drawdown_percent:.2f}% (abs loss {abs_loss:.2f} EUR)")
+            self.logger.warning(
+                f"Daily drawdown limit reached (portfolio): {dd:.2f}% >= {self.daily_drawdown_percent:.2f}% (abs loss {abs_loss:.2f} EUR). Pausing buys."
+            )
             return True
         return False
 
