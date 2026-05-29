@@ -7,13 +7,13 @@ base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 60
 trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
-allocation_per_trade_percent = 15.0
+allocation_per_trade_percent = 5.0
 
 [risk_management]
 max_drawdown_percent = 10.0
 stop_loss_percent = 1.5
 allocation_per_trade_percent = 5.0
-min_buy_score = 4.0
+min_buy_score = 12.0
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = false
 mr_rsi_oversold_threshold = 30
@@ -37,13 +37,15 @@ enable_volume_filter = true
 volume_filter_min_ratio = 0.2
 enable_time_stop = true
 time_stop_hours = 24
-enable_daily_drawdown = true
-daily_loss_limit_percent = 2.0
+enable_daily_drawdown = false
+    daily_loss_limit_percent = 100.0
 risk_off_allocation_multiplier = 0.5
 enable_volatility_targeting = false
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
+# NOTE: pause_after_loss_streak_minutes set to 0 to remove cooling period
+
 take_profit_percent = 4.0
 adaptive_take_profit = false
 max_take_profit_percent = 0.0
@@ -54,7 +56,7 @@ reentry_guard_pairs = [ "VER",]
 min_reentry_profit_pct = 0.0
 min_net_sell_profit_pct = 2.0
 exit_slippage_buffer_pct = 0.35
-enable_atr_stop = true
+enable_atr_stop = false  # disabled by assistant per user request
 atr_period = 20
 atr_multiplier = 3.0
 atr_trail_multiplier = 2.0
@@ -66,9 +68,9 @@ max_open_positions = 1
 trade_cooldown_seconds = 3600
 global_trade_cooldown_seconds = 3600
 empty_sell_log_cooldown_seconds = 1800
-min_trade_eur = 10.0
-min_free_margin_buffer = 5.0
-max_notional_per_side = 25.0
+min_trade_eur = 1.0
+min_free_margin_buffer = 0.0
+max_notional_per_side = 10000.0
 max_open_positions_per_side = 1
 enable_parallel_caps = false
 min_auto_scale_notional = 0.2
@@ -105,7 +107,9 @@ intraday_sl_percent = 1.5
 intraday_tp_percent = 1.8
 intraday_cooldown_seconds = 1800
 max_consecutive_losses = 2
-loss_streak_pause_minutes = 30
+loss_streak_pause_minutes = 60
+# NOTE: loss_streak_pause_minutes set to 0 to remove cooling period
+
 
 [bear_shield]
 enable_bear_shield = false
