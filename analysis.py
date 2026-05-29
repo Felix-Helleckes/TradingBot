@@ -65,7 +65,7 @@ class TechnicalAnalysis:
         self.mr_rsi_sell = 67.0          # RSI >= threshold triggers mean-reversion SELL
         # Price-action pattern helpers (lightweight): when enabled, detect 2/3-bar patterns
         # from synthetic or NAS 5m bars and boost/confirm signals. Disabled by default.
-        self.enable_price_action = False
+        self.enable_price_action = True
         self.price_action_boost = 12.0
         # Throttle history saves: only flush to disk every 5 minutes to reduce
         # SD card wear on Raspberry Pi (4 pairs × every 60 s = ~240 writes/hr otherwise)
