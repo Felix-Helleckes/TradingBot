@@ -110,6 +110,12 @@ max_consecutive_losses = 2
 loss_streak_pause_minutes = 60
 # NOTE: loss_streak_pause_minutes set to 0 to remove cooling period
 
+[symbols]
+# Per-symbol overrides. Example:
+# [symbols.DOTEUR]
+# intraday_sl_percent = 2.5
+# intraday_tp_percent = 3.0
+
 
 [bear_shield]
 enable_bear_shield = false
