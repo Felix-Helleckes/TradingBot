@@ -63,6 +63,10 @@ class TechnicalAnalysis:
         self.enable_trend_signals = True # trend/breakout: Bollinger Band momentum
         self.mr_rsi_buy = 33.0           # RSI <= threshold triggers mean-reversion BUY
         self.mr_rsi_sell = 67.0          # RSI >= threshold triggers mean-reversion SELL
+        # Price-action pattern helpers (lightweight): when enabled, detect 2/3-bar patterns
+        # from synthetic or NAS 5m bars and boost/confirm signals. Disabled by default.
+        self.enable_price_action = False
+        self.price_action_boost = 12.0
         # Throttle history saves: only flush to disk every 5 minutes to reduce
         # SD card wear on Raspberry Pi (4 pairs × every 60 s = ~240 writes/hr otherwise)
         self._last_save_ts = 0.0
@@ -274,7 +278,52 @@ class TechnicalAnalysis:
         
         # Approximate TR using absolute difference of consecutive sampled closes
         tr = [abs(sampled[i] - sampled[i-1]) for i in range(1, len(sampled))]
-        return np.mean(tr[-period:])
+        val = np.mean(tr[-period:])
+        
+        # return ATR value
+        return val
+
+    def calculate_volume_spike(self, pair, nas_root=None, window=5):
+        """Estimate recent volume spike from NAS 5m OHLC CSVs.
+
+        Returns ratio: current_volume / median(previous_window_volumes)
+        or None when not available.
+        """
+        try:
+            from pathlib import Path
+            import csv
+            if nas_root is None:
+                nas_root = os.environ.get('NAS_ROOT', '/mnt/fritz_nas/Volume/kraken')
+            folder_map = {
+                'XBTEUR': 'XXBTZEUR',
+                'ETHEUR': 'XETHZEUR',
+                'XRPEUR': 'XXRPZEUR',
+                'SOLEUR': 'SOLEUR',
+            }
+            folder = folder_map.get(pair, pair)
+            year = __import__('datetime').datetime.utcnow().year
+            csv_path = Path(nas_root) / str(year) / folder / 'ohlc_5m.csv'
+            if not csv_path.exists():
+                return None
+            vols = []
+            with open(csv_path, newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        vols.append(float(row.get('volume') or row.get('vol') or row.get('v') or 0.0))
+                    except Exception:
+                        continue
+            if len(vols) < window + 1:
+                return None
+            current = vols[-1]
+            prev = vols[-(window+1):-1]
+            import statistics
+            med = statistics.median(prev) if prev else None
+            if med is None or med <= 0:
+                return None
+            return current / med
+        except Exception:
+            return None
 
     def check_mtf_trend(self, prices, short_p=20, long_p=50):
         """Check if the general trend is bullish on the provided history."""
@@ -347,6 +396,23 @@ class TechnicalAnalysis:
                 elif rsi_full >= self.mr_rsi_sell and sma_ratio < 0.01:
                     signal = "SELL"
                     score = mr_score
+                # Price-action confirmation (optional): boost score when simple 2/3-bar patterns align
+                try:
+                    if getattr(self, 'enable_price_action', False):
+                        from price_action import two_bar_pattern, three_bar_pattern
+                        hist = list(price_history)
+                        if len(hist) >= 3:
+                            # build synthetic 3 bars as (o,h,l,c) using closes approximated
+                            b1 = (hist[-3], hist[-3], hist[-3], hist[-3])
+                            b2 = (hist[-2], hist[-2], hist[-2], hist[-2])
+                            b3 = (hist[-1], hist[-1], hist[-1], hist[-1])
+                            pat = three_bar_pattern([b1,b2,b3])
+                            if pat == 'BREAKOUT_UP' and signal == 'BUY':
+                                score = min(50.0, score + self.price_action_boost)
+                            if pat == 'BREAKOUT_DOWN' and signal == 'SELL':
+                                score = max(-50.0, score - self.price_action_boost)
+                except Exception:
+                    pass
 
             # --- Trend/breakout signal path (Bollinger Band momentum) ---
             # Only overrides MR signal if trend signal is stronger
