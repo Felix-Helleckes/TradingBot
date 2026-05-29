@@ -7,12 +7,12 @@ base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 60
 trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
-allocation_per_trade_percent = 100.0
+allocation_per_trade_percent = 10.0
 
 [risk_management]
 max_drawdown_percent = 10.0
 stop_loss_percent = 1.5
-allocation_per_trade_percent = 100.0
+allocation_per_trade_percent = 10.0
 min_buy_score = 0.0
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = false
