@@ -164,6 +164,6 @@ SOLEUR = 0.02
 XXRPZEUR = 5.0
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 2.0
+trade_amount_eur = 90.45
 initial_balance = 100.0
 target_balance_eur = 10000.0
