@@ -83,8 +83,10 @@ class KrakenAPI:
             db_dir.mkdir(parents=True, exist_ok=True)
             tb_path = str(db_dir / 'token_bucket.db')
             token_bucket.init_db(tb_path)
-            # default: capacity 10 tokens, refill 1 token/sec (allows bursts)
-            token_bucket.create_bucket('kraken_api', capacity=10.0, refill_rate_per_sec=1.0)
+            # Tuned token-bucket for Kraken API: larger burst capacity + faster refill to
+            # accommodate our multi-threaded loop and reduce "rate limit exceeded" errors.
+            # Capacity = 60 tokens, refill = 3 tokens/sec (allows bursts and sustained 3 req/s)
+            token_bucket.create_bucket('kraken_api', capacity=60.0, refill_rate_per_sec=3.0)
             self._tb_name = 'kraken_api'
             self._use_token_bucket = True
         except Exception:
@@ -571,7 +573,15 @@ class KrakenAPI:
                 order_params['oflags'] = 'post'
                 
             if leverage:
-                order_params['leverage'] = str(leverage)
+                # Kraken expects leverage as integer-like string (no trailing .0).
+                try:
+                    lev = float(leverage)
+                    if abs(lev - int(lev)) < 1e-8:
+                        order_params['leverage'] = str(int(lev))
+                    else:
+                        order_params['leverage'] = str(lev)
+                except Exception:
+                    order_params['leverage'] = str(leverage)
 
             # Staggered limit ladder for large notional orders (simple execution hardening)
             try:
