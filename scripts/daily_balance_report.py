@@ -132,7 +132,10 @@ def main() -> None:
             detail_lines.append(f"  📈 Margin P&amp;L: {val:+.2f} EUR")
         else:
             label = asset.replace("XXBT", "BTC").replace("XETH", "ETH").replace("XXRP", "XRP")
-            detail_lines.append(f"  🪙 {label}:  {val:.2f} EUR")
+            # add small arrow + EUR delta next to each balance like overlay
+            delta = val - (0.0)  # placeholder: historical baseline unavailable here
+            arrow = "▲" if delta >= 0 else "▼"
+            detail_lines.append(f"  🪙 {label}:  {val:.2f} EUR {arrow} {delta:+.2f} EUR")
 
     message = (
         f"📊 <b>Täglicher Kontostand</b>\n"

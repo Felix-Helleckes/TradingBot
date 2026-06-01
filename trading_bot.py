@@ -156,6 +156,10 @@ class TradingBot:
         self.pair_scores = {}
         self.holdings = {}
         self.purchase_prices = {}
+        # per-pair timestamp to rate-limit phantom-position reconciliation (seconds)
+        self._phantom_last_checked = {}
+        # path to persist purchase prices for recovery across restarts
+        self.data_purchase_prices_path = os.path.join(os.path.dirname(__file__), 'data', 'purchase_prices.json')
         self.peak_prices = {}
         self.position_qty = {}
         self.short_qty = {}
@@ -269,10 +273,16 @@ class TradingBot:
         self.max_consecutive_losses = int(self.config.get('risk_management', {}).get('max_consecutive_losses', 3))
         self.pause_after_loss_streak_minutes = int(self.config.get('risk_management', {}).get('pause_after_loss_streak_minutes', 180))
         self.enable_live_shorts = bool(self.config.get('shorting', {}).get('enabled', False))
-        self.short_leverage = str(self.config.get('shorting', {}).get('leverage', '2'))
+        # Shorting config
+        self.short_leverage = float(self.config.get('shorting', {}).get('leverage', 2.0))
+        # cap per-short to limit tail risk
         self.max_short_notional_eur = float(self.config.get('shorting', {}).get('max_short_notional_eur', 50.0))
         self.short_take_profit_percent = float(self.config.get('shorting', {}).get('short_take_profit_percent', 2.5))
-        self.short_stop_loss_percent = float(self.config.get('shorting', {}).get('short_stop_loss_percent', 3.0))
+        self.short_stop_loss_percent = float(self.config.get('shorting', {}).get('short_stop_loss_percent', 3.5))
+        # Safety: minimum margin buffer (fraction of free margin to keep)
+        self.min_free_margin_buffer = float(self.config.get('shorting', {}).get('min_free_margin_buffer', 0.05))
+        # Short enabling toggle
+        self.enable_live_shorts = bool(self.config.get('shorting', {}).get('enabled', False))
 
         # Fast scalp / hit-and-run profile
         self.enable_fast_scalp = bool(self.config.get('profiles', {}).get('fast_scalp', {}).get('enabled', False))
@@ -942,7 +952,32 @@ class TradingBot:
             except Exception:
                 pass
         self.get_crypto_holdings()
+        # Load persisted purchase prices first (higher priority than history)
+        try:
+            persisted = {}
+            if os.path.exists(self.data_purchase_prices_path):
+                with open(self.data_purchase_prices_path, 'r', encoding='utf-8') as pf:
+                    try:
+                        persisted = json.load(pf)
+                    except Exception:
+                        persisted = {}
+            for p, meta in (persisted or {}).items():
+                try:
+                    self.purchase_prices[p] = float(meta.get('entry_price_eur', 0.0) or 0.0)
+                    self.position_qty[p] = float(meta.get('qty', 0.0) or 0.0)
+                    self.entry_timestamps[p] = int(meta.get('entry_ts', 0) or 0)
+                    self.fees_paid[p] = float(meta.get('fees_eur', 0.0) or 0.0)
+                except Exception:
+                    self.logger.warning(f"Could not parse persisted purchase meta for {p} in {self.data_purchase_prices_path}")
+        except Exception:
+            pass
+        # Fall back to history replay if no persisted file or force requested
         self.load_purchase_prices_from_history(force=force_history)
+        # Ensure all keys exist
+        for p in list(self.purchase_prices.keys()):
+            self.fees_paid.setdefault(p, 0.0)
+            self.position_qty.setdefault(p, 0.0)
+            self.entry_timestamps.setdefault(p, None)
 
     def _place_live_order(self, pair, direction, volume, price=None, leverage=None, post_only=False, reduce_only=False):
         """Place a live order using the configured execution path.
@@ -1240,6 +1275,10 @@ class TradingBot:
                 else:
                     # Detect phantom historical positions: if history qty >> live qty by >10%,
                     # the VWAP is contaminated by old sessions. Fall back to most recent buy.
+                    # rate-limit phantom checks to once per 60s per pair to avoid API limits
+                    last = self._phantom_last_checked.get(pair, 0)
+                    if time.time() - last < 60:
+                        continue
                     if history_qty > live_qty * 1.10 and live_qty >= min_vol * 0.95:
                         # Find most recent BUY for this pair in history
                         recent_buy = next(
@@ -1253,11 +1292,14 @@ class TradingBot:
                             rv = float(recent_buy.get('vol', 1)) or 1.0
                             rf = float(recent_buy.get('fee', 0))
                             corrected = (rc + rf) / rv
+                            # Use the MOST RECENT BUY price as authoritative; log that concisely
                             self.logger.warning(
-                                f"purchase_prices[{pair}]: history qty {history_qty:.4f} >> live {live_qty:.4f} "
-                                f"(phantom positions detected). Using last buy price {corrected:.5f} instead of {self.purchase_prices[pair]:.5f}."
+                                f"purchase_prices[{pair}]: last_buy={corrected:.5f} EUR | live_qty={live_qty:.4f}"
                             )
+                            # persist the corrected (most-recent-buy) entry price
                             self.purchase_prices[pair] = corrected
+                            # mark check time to rate-limit repeated API hits
+                            self._phantom_last_checked[pair] = int(time.time())
                     if self.entry_timestamps.get(pair) is None:
                         self.entry_timestamps[pair] = int(time.time())
 
@@ -2299,6 +2341,12 @@ class TradingBot:
                 score = self.pair_scores.get(pair, 0)
                 signal = sig if sig is not None else "HOLD"
 
+                # Log every pair's signal+score so operator sees all signals in the logs
+                try:
+                    self.logger.info(f"PAIR {pair}: {signal} | score {float(score):.2f}")
+                except Exception:
+                    pass
+
                 if signal in ["BUY", "SELL"] and abs(score) > abs(best_score):
                     best_pair = pair
                     best_signal = signal
@@ -2832,6 +2880,33 @@ class TradingBot:
                         init_stop = max(0.0, price - (atr * self.atr_multiplier))
                         self.stop_info[pair] = {'stop_price': init_stop, 'type': 'ATR'}
                         self.logger.info(f"Initialized ATR stop for {pair}: {init_stop:.4f} (atr={atr:.4f})")
+                # persist purchase + fees immediately so restarts keep entry data
+                buy_meta = {
+                    'pair': pair,
+                    'side': 'long',
+                    'qty': float(volume),
+                    'entry_price_eur': float(fill_price or price),
+                    'fees_eur': float(result.get('fee', 0) if isinstance(result, dict) else 0.0),
+                    'notional_eur': float(volume * (fill_price or price)),
+                    'entry_ts': int(now_ts),
+                }
+                try:
+                    os.makedirs(os.path.dirname(self.data_purchase_prices_path), exist_ok=True)
+                    # load existing, update, write atomically
+                    existing = {}
+                    if os.path.exists(self.data_purchase_prices_path):
+                        with open(self.data_purchase_prices_path, 'r', encoding='utf-8') as pf:
+                            try:
+                                existing = json.load(pf)
+                            except Exception:
+                                existing = {}
+                    existing[pair] = buy_meta
+                    with open(self.data_purchase_prices_path + '.tmp', 'w', encoding='utf-8') as pf:
+                        json.dump(existing, pf, separators=(',', ':'), ensure_ascii=False)
+                    os.replace(self.data_purchase_prices_path + '.tmp', self.data_purchase_prices_path)
+                except Exception as e:
+                    self.logger.warning(f"Could not persist purchase_prices to {self.data_purchase_prices_path}: {e}")
+                # Journal trade afterward
                 self._journal_trade('BUY', pair, volume, price, 0.0, 'BUY_EXECUTED', extra={'result': result, 'expected_price': price, 'fill_price': fill_price})
                 print(f"\n[BUY] {volume:.6f} {pair} (~{volume*price:.2f} EUR) - Trade #{self.trade_count}")
                 _notifier.send(
@@ -2980,6 +3055,31 @@ class TradingBot:
                 self._save_cooldown_state()
                 self.short_qty[pair] = volume
                 self.short_entry_prices[pair] = price
+                # persist short entry so restarts keep short state
+                short_meta = {
+                    'pair': pair,
+                    'side': 'short',
+                    'qty': float(volume),
+                    'entry_price_eur': float(price),
+                    'fees_eur': float(result.get('fee', 0) if isinstance(result, dict) else 0.0),
+                    'notional_eur': float(volume * price),
+                    'entry_ts': int(now_ts),
+                }
+                try:
+                    os.makedirs(os.path.dirname(self.data_purchase_prices_path), exist_ok=True)
+                    existing = {}
+                    if os.path.exists(self.data_purchase_prices_path):
+                        with open(self.data_purchase_prices_path, 'r', encoding='utf-8') as pf:
+                            try:
+                                existing = json.load(pf)
+                            except Exception:
+                                existing = {}
+                    existing[pair] = short_meta
+                    with open(self.data_purchase_prices_path + '.tmp', 'w', encoding='utf-8') as pf:
+                        json.dump(existing, pf, separators=(',', ':'), ensure_ascii=False)
+                    os.replace(self.data_purchase_prices_path + '.tmp', self.data_purchase_prices_path)
+                except Exception as e:
+                    self.logger.warning(f"Could not persist short entry to {self.data_purchase_prices_path}: {e}")
                 self.entry_timestamps[pair] = int(now_ts)
                 self.logger.info(f"SHORT OPEN SUCCESS: {result}")
                 self.logger.info(f"SHORT OPEN SUMMARY: {pair} {volume:.6f} (~{notional:.2f} EUR)")
@@ -3007,6 +3107,7 @@ class TradingBot:
             entry = self.short_entry_prices.get(pair, 0.0)
             if qty <= 0 or entry <= 0:
                 return
+            # compute pnl using leverage-neutral formula (entry - exit) * qty
             pnl_eur = (entry - price) * qty
             pnl_pct = ((entry - price) / entry) * 100.0
             self.logger.info(f"Placing SHORT CLOSE order: {qty:.6f} {pair} at ~{price:.2f} EUR")

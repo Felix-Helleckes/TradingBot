@@ -24,7 +24,7 @@ api=API(API_KEY, API_SECRET)
 
 CFG_PATH = _HERE / 'config.toml'
 LOG = _HERE / 'logs' / 'close_everything.log'
-OUT = _HERE / 'logs' / 'close_everything_results.json'
+OUT = str(_HERE / 'logs' / 'close_everything_results.json')
 
 def log(msg):
     ts=time.strftime('%Y-%m-%d %H:%M:%S')
@@ -111,6 +111,24 @@ def get_price_for_pair(pair):
         return None
     return None
 
+# helper: query AssetPairs to obtain minimum order volume for a pair
+def get_pair_min_volume(pair):
+    try:
+        r = api.query_public('AssetPairs', {'pair': pair})
+        if r.get('error'):
+            return min_auto
+        res = r.get('result', {})
+        # result keys may be different from requested pair; take first
+        if not res:
+            return min_auto
+        info = next(iter(res.values()))
+        ordmin = info.get('ordermin') or info.get('ordermin') or None
+        if ordmin is None:
+            return min_auto
+        return float(ordmin)
+    except Exception:
+        return min_auto
+
 # close longs first (sell)
 for p in longs:
     pid=p.get('pid')
@@ -167,7 +185,10 @@ for p in sorted(shorts, key=lambda x: float(x.get('cost',0))):
     if vol<=0:
         log('Zero volume, skipping')
         continue
-    params={'pair':pair,'type':'buy','ordertype':'market','volume':str(vol)}
+    # compute min volume and round to safe precision
+    min_vol = get_pair_min_volume(pair)
+    vol_rounded = max(round(vol,8), min_vol)
+    params={'pair':pair,'type':'buy','ordertype':'market','volume':str(vol_rounded),'reduce_only':'true'}
     r=query_private('AddOrder', params)
     if r.get('error'):
         log(f'AddOrder error for SHORT {pid}: {r.get("error")}')
