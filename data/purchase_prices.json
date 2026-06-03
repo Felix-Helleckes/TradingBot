@@ -2,37 +2,37 @@
   "XRPEUR": {
     "pair": "XRPEUR",
     "side": "short",
-    "qty": 10.706572,
-    "entry_price_eur": 1.14602508,
+    "qty": 28.341313,
+    "entry_price_eur": 1.0585,
     "fees_eur": 0.0,
-    "notional_eur": 12.27,
-    "entry_ts": 1780218392
+    "notional_eur": 30.0,
+    "entry_ts": 1780424680
   },
   "XBTEUR": {
     "pair": "XBTEUR",
     "side": "short",
-    "qty": 0.000252,
-    "entry_price_eur": 65793.65079365,
+    "qty": 0.0002618413381139743,
+    "entry_price_eur": 57286.6,
     "fees_eur": 0.0,
-    "notional_eur": 16.58,
-    "entry_ts": 1779084645
+    "notional_eur": 14.999999999999998,
+    "entry_ts": 1780428740
   },
   "SOLEUR": {
     "pair": "SOLEUR",
     "side": "short",
-    "qty": 0.210733,
-    "entry_price_eur": 71.18011892,
+    "qty": 0.23771790808240886,
+    "entry_price_eur": 63.1,
     "fees_eur": 0.0,
     "notional_eur": 15.0,
-    "entry_ts": 1780275213
+    "entry_ts": 1780457886
   },
   "ETHEUR": {
     "pair": "ETHEUR",
     "side": "short",
-    "qty": 0.008752,
-    "entry_price_eur": 1713.89396709,
+    "qty": 0.009409816320385426,
+    "entry_price_eur": 1594.08,
     "fees_eur": 0.0,
     "notional_eur": 15.0,
-    "entry_ts": 1780245297
+    "entry_ts": 1780442680
   }
 }

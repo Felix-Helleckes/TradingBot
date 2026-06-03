@@ -1,0 +1,125 @@
+17eac54 docs(short): YT short script + recording commands
+5570591 docs(changelog): add 2026-06-01 changelog entries
+1ce8839 rebuild: purchase_prices.json from logs; save close run log
+0ea57da fix(close): make short-close reduce_only + min-volume rounding; persist last-buy on phantom positions; rate-limit phantom checks (60s)
+a59d598 test: add focused DOTEUR verify outputs
+--- close_everything.log (tail -n 40)
+2026-06-01 11:10:59 - Closed SHORT TJIDH2-TLBGY-FQ26YX successfully -> {'txid': ['OP2Y2P-OCE4B-4KBMLW'], 'descr': {'order': 'buy 0.00875 ETHEUR @ market'}}
+2026-06-01 11:11:25 - Starting full liquidation run (close_everything_now)
+2026-06-01 11:11:25 - Found 0 long(s) and 3 short(s) to close
+2026-06-01 11:11:25 - Attempting to close SHORT TIY5XX-BV7J4-NI3ZXN XXRPZEUR vol=10.70657206 (market BUY)
+2026-06-01 11:11:25 - AddOrder error for SHORT TIY5XX-BV7J4-NI3ZXN: ['EOrder:Insufficient funds']
+2026-06-01 11:11:25 - Trying partial BUY vol=5.35328603
+2026-06-01 11:11:25 - Partial BUY failed: ['EOrder:Insufficient funds']
+2026-06-01 11:11:25 - Trying partial BUY vol=2.67664301
+2026-06-01 11:11:25 - Partial BUY succeeded for TIY5XX-BV7J4-NI3ZXN vol=2.67664301 -> {'txid': ['OA2YVS-6FAWW-2LED4Z'], 'descr': {'order': 'buy 2.67664 XRPEUR @ market'}}
+2026-06-01 11:11:26 - Attempting to close SHORT TP4J37-I6O3M-IRZQEQ XXBTZEUR vol=0.00023688 (market BUY)
+2026-06-01 11:11:26 - AddOrder error for SHORT TP4J37-I6O3M-IRZQEQ: ['EOrder:Insufficient funds']
+2026-06-01 11:11:26 - Could not close SHORT TP4J37-I6O3M-IRZQEQ
+2026-06-01 11:11:27 - Attempting to close SHORT TJIDH2-TLBGY-FQ26YX XETHZEUR vol=0.00875222 (market BUY)
+2026-06-01 11:11:27 - AddOrder error for SHORT TJIDH2-TLBGY-FQ26YX: ['EOrder:Insufficient funds']
+2026-06-01 11:11:27 - Could not close SHORT TJIDH2-TLBGY-FQ26YX
+2026-06-01 11:11:43 - Starting full liquidation run (close_everything_now)
+2026-06-01 11:11:43 - Found 0 long(s) and 3 short(s) to close
+2026-06-01 11:11:43 - Attempting to close SHORT TIY5XX-BV7J4-NI3ZXN XXRPZEUR vol=10.70657206 (market BUY)
+2026-06-01 11:11:43 - AddOrder error for SHORT TIY5XX-BV7J4-NI3ZXN: ['EOrder:Insufficient funds']
+2026-06-01 11:11:43 - Trying partial BUY vol=5.35328603
+2026-06-01 11:11:43 - Partial BUY failed: ['EOrder:Insufficient funds']
+2026-06-01 11:11:43 - Trying partial BUY vol=2.67664301
+2026-06-01 11:11:43 - Partial BUY failed: ['EOrder:Insufficient funds']
+2026-06-01 11:11:43 - Trying partial BUY vol=1.3383215
+2026-06-01 11:11:43 - Partial BUY failed: ['EGeneral:Invalid arguments:volume minimum not met']
+2026-06-01 11:11:43 - Trying partial BUY vol=0.66916075
+2026-06-01 11:11:43 - Partial BUY failed: ['EGeneral:Invalid arguments:volume minimum not met']
+2026-06-01 11:11:43 - Trying partial BUY vol=0.33458037
+2026-06-01 11:11:44 - Partial BUY failed: ['EGeneral:Invalid arguments:volume minimum not met']
+2026-06-01 11:11:45 - Attempting to close SHORT TP4J37-I6O3M-IRZQEQ XXBTZEUR vol=0.00023688 (market BUY)
+2026-06-01 11:11:45 - AddOrder error for SHORT TP4J37-I6O3M-IRZQEQ: ['EOrder:Insufficient funds']
+2026-06-01 11:11:45 - Could not close SHORT TP4J37-I6O3M-IRZQEQ
+2026-06-01 11:11:46 - Attempting to close SHORT TJIDH2-TLBGY-FQ26YX XETHZEUR vol=0.00875222 (market BUY)
+2026-06-01 11:11:46 - AddOrder error for SHORT TJIDH2-TLBGY-FQ26YX: ['EOrder:Insufficient funds']
+2026-06-01 11:11:46 - Could not close SHORT TJIDH2-TLBGY-FQ26YX
+2026-06-01 11:11:47 - Finished liquidation run
+2026-06-01 11:25:30 - Starting full liquidation run (close_everything_now)
+2026-06-01 11:25:30 - No open positions to close
+2026-06-01 11:25:30 - Found 0 long(s) and 0 short(s) to close
+2026-06-01 11:25:30 - Finished liquidation run
+--- bot stdout (tail -n 40)
+2026-06-01 10:23:34,814 - INFO - PAIR XRPEUR: BUY | score 8.88
+INFO:trading_bot:[13846] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+2026-06-01 10:23:37,585 - INFO - [13846] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+[13846] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: XRPEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369INFO:trading_bot:PAIR XBTEUR: BUY | score 2.61
+2026-06-01 10:24:40,598 - INFO - PAIR XBTEUR: BUY | score 2.61
+INFO:trading_bot:PAIR ETHEUR: BUY | score -2.64
+2026-06-01 10:24:40,850 - INFO - PAIR ETHEUR: BUY | score -2.64
+INFO:trading_bot:PAIR SOLEUR: BUY | score -4.45
+2026-06-01 10:24:41,101 - INFO - PAIR SOLEUR: BUY | score -4.45
+INFO:trading_bot:PAIR XRPEUR: BUY | score 3.03
+2026-06-01 10:24:41,352 - INFO - PAIR XRPEUR: BUY | score 3.03
+INFO:trading_bot:[13847] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+2026-06-01 10:24:42,773 - INFO - [13847] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+[13847] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369INFO:root:Configuration loaded successfully from /home/felix/tradingbot/config.toml
+2026-06-01 10:24:42,780 - INFO - Configuration loaded successfully from /home/felix/tradingbot/config.toml
+INFO:trading_bot:Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+2026-06-01 10:24:42,959 - INFO - Validated trading pairs: ['XBTEUR', 'ETHEUR', 'SOLEUR', 'XRPEUR']
+INFO:trading_bot:PAIR XBTEUR: BUY | score 2.61
+2026-06-01 10:25:43,068 - INFO - PAIR XBTEUR: BUY | score 2.61
+INFO:trading_bot:PAIR ETHEUR: BUY | score -2.64
+2026-06-01 10:25:43,319 - INFO - PAIR ETHEUR: BUY | score -2.64
+INFO:trading_bot:PAIR SOLEUR: BUY | score -4.45
+2026-06-01 10:25:43,574 - INFO - PAIR SOLEUR: BUY | score -4.45
+INFO:trading_bot:PAIR XRPEUR: BUY | score 3.03
+2026-06-01 10:25:43,825 - INFO - PAIR XRPEUR: BUY | score 3.03
+ERROR:kraken_interface:Open Orders Query - API Error: ['EAPI:Invalid nonce']
+2026-06-01 10:25:45,486 - ERROR - Open Orders Query - API Error: ['EAPI:Invalid nonce']
+INFO:trading_bot:[13848] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+2026-06-01 10:25:45,487 - INFO - [13848] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+[13848] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369INFO:trading_bot:PAIR XBTEUR: BUY | score 2.61
+2026-06-01 10:26:45,591 - INFO - PAIR XBTEUR: BUY | score 2.61
+INFO:trading_bot:PAIR ETHEUR: BUY | score -2.64
+2026-06-01 10:26:45,842 - INFO - PAIR ETHEUR: BUY | score -2.64
+INFO:trading_bot:PAIR SOLEUR: BUY | score -4.45
+2026-06-01 10:26:46,093 - INFO - PAIR SOLEUR: BUY | score -4.45
+INFO:trading_bot:PAIR XRPEUR: BUY | score 3.03
+2026-06-01 10:26:46,344 - INFO - PAIR XRPEUR: BUY | score 3.03
+INFO:trading_bot:[13849] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+2026-06-01 10:26:47,738 - INFO - [13849] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369
+[13849] BTC:BUY ETH:BUY SOL:BUY XRP:BUY | RISK_ON/ACTIVE | Best: SOLEUR (BUY) | Bal: 89.28EUR | Start: 23.46EUR | NetCF: +0.00/-0.00EUR | AdjPnL: +65.82EUR | TotalPnL: -10.72EUR | Trades: 369--- purchase_prices.json
+{
+  "XRPEUR": {
+    "pair": "XRPEUR",
+    "side": "short",
+    "qty": 10.706572,
+    "entry_price_eur": 1.14602508,
+    "fees_eur": 0.0,
+    "notional_eur": 12.27,
+    "entry_ts": 1780218392
+  },
+  "XBTEUR": {
+    "pair": "XBTEUR",
+    "side": "short",
+    "qty": 0.000252,
+    "entry_price_eur": 65793.65079365,
+    "fees_eur": 0.0,
+    "notional_eur": 16.58,
+    "entry_ts": 1779084645
+  },
+  "SOLEUR": {
+    "pair": "SOLEUR",
+    "side": "short",
+    "qty": 0.210733,
+    "entry_price_eur": 71.18011892,
+    "fees_eur": 0.0,
+    "notional_eur": 15.0,
+    "entry_ts": 1780275213
+  },
+  "ETHEUR": {
+    "pair": "ETHEUR",
+    "side": "short",
+    "qty": 0.008752,
+    "entry_price_eur": 1713.89396709,
+    "fees_eur": 0.0,
+    "notional_eur": 15.0,
+    "entry_ts": 1780245297
+  }
+}

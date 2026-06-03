@@ -188,7 +188,7 @@ for p in sorted(shorts, key=lambda x: float(x.get('cost',0))):
     # compute min volume and round to safe precision
     min_vol = get_pair_min_volume(pair)
     vol_rounded = max(round(vol,8), min_vol)
-    params={'pair':pair,'type':'buy','ordertype':'market','volume':str(vol_rounded),'reduce_only':'true'}
+    params={'pair':pair,'type':'buy','ordertype':'market','volume':str(vol_rounded)}
     r=query_private('AddOrder', params)
     if r.get('error'):
         log(f'AddOrder error for SHORT {pid}: {r.get("error")}')

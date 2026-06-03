@@ -53,6 +53,25 @@ CACHE_TTL_SECONDS = 24 * 3600
 _RISK_CFG_CACHE: dict = {'data': None, 'ts': 0.0, 'ttl': 120.0}
 
 
+# Kraken's OpenPositions returns legacy asset names (XXRPZEUR, XETHZEUR,
+# XXBTZEUR) while the bot trades with altnames (XRPEUR, ETHEUR, XBTEUR).
+# Normalize both sides to a common key so reduce-only close matching works.
+# Without this, "XXRPZEUR" != "XRPEUR" caused SHORT CLOSE FAILED loops while a
+# real open short existed on the exchange.
+_PAIR_ALIASES = {
+    'XXBTZEUR': 'XBTEUR', 'XBTEUR': 'XBTEUR', 'BTCEUR': 'XBTEUR',
+    'XETHZEUR': 'ETHEUR', 'ETHEUR': 'ETHEUR',
+    'XXRPZEUR': 'XRPEUR', 'XRPEUR': 'XRPEUR',
+    'SOLEUR': 'SOLEUR',
+}
+
+
+def _normalize_pair_key(pair) -> str:
+    """Map any Kraken pair spelling to a canonical altname key."""
+    p = str(pair or '').upper().replace('/', '')
+    return _PAIR_ALIASES.get(p, p)
+
+
 class KrakenAPI:
     """Wrapper for Kraken API interactions."""
     def __init__(self, api_key, api_secret, paper_mode: bool = False):
@@ -401,9 +420,10 @@ class KrakenAPI:
             if reduce_only:
                 target_type = 'sell' if direction == 'buy' else 'buy'
                 closable_volume = 0.0
+                want = _normalize_pair_key(pair)
                 for _, p in op_result.items():
                     try:
-                        if str(p.get('pair', '')).upper() != str(pair).upper():
+                        if _normalize_pair_key(p.get('pair', '')) != want:
                             continue
                         if str(p.get('type', '')).lower() != target_type:
                             continue

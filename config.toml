@@ -6,12 +6,12 @@ secret = ""
 base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 60
-trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
+trade_pairs = [ "XBTEUR", "ETHEUR", "SOLEUR", "XRPEUR" ]
 allocation_per_trade_percent = 20.0
 
 [risk_management]
 max_drawdown_percent = 10.0
-stop_loss_percent = 1.5
+stop_loss_percent = 99.0
 allocation_per_trade_percent = 20.0
 min_buy_score = 0.0
 enable_mean_reversion_signals = true
@@ -23,11 +23,11 @@ regime_benchmark_pair = "XBTEUR"
 regime_min_score = -10.0
 enable_mtf_regime_scoring = false
 mtf_regime_min_score = -5.0
-enable_hard_stop_loss = true
-hard_stop_loss_percent = 1.5
+enable_hard_stop_loss = false
+hard_stop_loss_percent = 99.0
 enable_break_even = true
 break_even_trigger_percent = 1.5
-airbag_drop_threshold = 15.0
+airbag_drop_threshold = 99.0
 airbag_window_minutes = 10
 enable_sentiment_guard = false
 enable_trading_hours = false
@@ -35,10 +35,10 @@ trading_hours_start_utc = 14
 trading_hours_end_utc = 22
 enable_volume_filter = true
 volume_filter_min_ratio = 0.2
-enable_time_stop = true
-time_stop_hours = 24
+enable_time_stop = false
+time_stop_hours = 9999
 enable_daily_drawdown = true
-    daily_loss_limit_percent = 10.0
+    daily_loss_limit_percent = 5.0
 risk_off_allocation_multiplier = 0.5
 enable_volatility_targeting = true
 target_volatility_pct = 1.6
@@ -54,9 +54,9 @@ fees_maker_percent = 0.16
 fees_taker_percent = 0.26
 reentry_guard_pairs = [ "VER",]
 min_reentry_profit_pct = 0.0
-min_net_sell_profit_pct = 2.0
+min_net_sell_profit_pct = 0.75
 exit_slippage_buffer_pct = 0.35
-enable_atr_stop = true
+enable_atr_stop = false
     atr_period = 20
     atr_multiplier = 3.0
     atr_trail_multiplier = 2.0
@@ -96,14 +96,15 @@ ema_fast_period = 9
 ema_slow_period = 21
 enable_mtf_macd_filter = true
 enable_partial_exit = true
-partial_exit_trigger_pct = 1.0
+# partial exit trigger (percent)
+partial_exit_trigger_pct = 0.5
 partial_exit_fraction = 0.5
 partial_exit_min_remaining_eur = 5.0
 
 [daytrading]
 enable_daytrading = true
-max_hold_hours = 12
-intraday_sl_percent = 1.5
+max_hold_hours = 9999
+intraday_sl_percent = 99.0
 intraday_tp_percent = 1.8
 intraday_cooldown_seconds = 1800
 max_consecutive_losses = 2
@@ -127,11 +128,14 @@ bear_benchmark_pair = "XBTEUR"
 bear_log_interval_minutes = 60
 
 [shorting]
-enabled = false
+enabled = true
+# activated live by operator via Hermes (Friday)
 leverage = "2"
-max_short_notional_eur = 0.0
+# Max notional per short to limit exposure — start small for safety
+max_short_notional_eur = 25.0
+# Take-profit and stop-loss for shorts (percent)
 short_take_profit_percent = 1.0
-short_stop_loss_percent = 2.5
+short_stop_loss_percent = 3.5
 
 [logging]
 log_level = "INFO"
@@ -172,6 +176,6 @@ SOLEUR = 0.02
 XXRPZEUR = 5.0
 
 [bot_settings.trade_amounts]
-trade_amount_eur = 90.45
+trade_amount_eur = 10.0
 initial_balance = 100.0
 target_balance_eur = 10000.0

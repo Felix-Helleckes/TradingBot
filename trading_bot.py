@@ -659,6 +659,46 @@ class TradingBot:
             # As a last resort, allow trading (fail-open) to avoid blocking due to transient errors
             return True
 
+    def _is_mtf_trend_bullish_30m(self, pair):
+        """Check 30m timeframe to confirm bullish trend (used for shorting decisions).
+
+        Same fail-open logic as _is_mtf_trend_bullish but on 30m interval.
+        """
+        try:
+            # Use cached regime data if fresh to avoid extra API calls
+            now = time.time()
+            if (now - self._regime_cache.get('ts', 0)) <= self._regime_cache_ttl:
+                # rely on cached pair history for MTF check
+                returns = self.analysis_tool.pair_price_history.get(pair)
+                if returns:
+                    closes = list(returns)
+                    return self.analysis_tool.check_mtf_trend(closes)
+
+            ohlc = self.api_client.get_ohlc_data(pair, interval=30) # 30m
+            data_key = next((k for k in ohlc if k != 'last'), None) if ohlc else None
+            if not ohlc or not data_key:
+                # API returned no data — fallback to local buffer if available,
+                # otherwise fail-open (allow trading) to avoid permanent blocks
+                self.logger.warning(f"MTF30 check: no OHLC from API for {pair}; falling back to local history if available")
+                local = self.analysis_tool.pair_price_history.get(pair)
+                if local:
+                    return self.analysis_tool.check_mtf_trend(list(local))
+                return True
+
+            # Kraken returns [time, open, high, low, close, vwap, volume, count]
+            closes = [float(row[4]) for row in ohlc[data_key]]
+            return self.analysis_tool.check_mtf_trend(closes)
+        except Exception as e:
+            self.logger.error(f"MTF30 check failed for {pair}: {e}")
+            # Exception occurred — attempt to use local cached history before failing open
+            local = self.analysis_tool.pair_price_history.get(pair)
+            if local:
+                try:
+                    return self.analysis_tool.check_mtf_trend(list(local))
+                except Exception:
+                    pass
+            # As a last resort, allow trading (fail-open) to avoid blocking due to transient errors
+            return True
     def _get_min_volume(self, pair):
         try:
             min_volumes = self.config['bot_settings'].get('min_volumes', {})
@@ -1794,6 +1834,33 @@ class TradingBot:
             return net_profit_pct >= min_net
         return True
 
+    def _can_close_short_profit_target(self, pair, current_price):
+        """Only allow closing a short when it yields REAL net profit after fees.
+
+        Mirror of _can_sell_profit_target for the short side. A short profits
+        when price FALLS below entry. We apply a conservative slippage buffer
+        (buying back slightly higher than mid), require the configured short
+        take-profit, and enforce a minimum NET profit after roundtrip fees.
+        Felix's rule: never close a short at a loss — only on real net gain.
+        """
+        entry = self.short_entry_prices.get(pair, 0.0)
+        if entry <= 0 or current_price <= 0:
+            return False
+        slippage_pct = float(self.config.get('risk_management', {}).get('exit_slippage_buffer_pct', 0.3))
+        # Closing a short = BUY, so a conservative (worse) fill is slightly higher.
+        conservative_exit_price = current_price * (1.0 + slippage_pct / 100.0)
+        # Short gross profit %: positive when we buy back below entry.
+        profit_pct = ((entry - conservative_exit_price) / entry) * 100.0
+        required_tp = float(self.short_take_profit_percent or 0.0)
+        if profit_pct < required_tp:
+            return False
+        # Enforce minimum NET profit after estimated roundtrip fees.
+        fees_total_frac = pct_to_frac(getattr(self, 'fees_maker_percent', 0.0)) + pct_to_frac(getattr(self, 'fees_taker_percent', 0.0))
+        fees_total_pct = fees_total_frac * 100.0
+        net_profit_pct = profit_pct - fees_total_pct
+        min_net = float(self.config.get('risk_management', {}).get('min_net_sell_profit_pct', self.min_net_sell_profit_pct))
+        return net_profit_pct >= max(0.0, min_net)
+
     def _update_trade_metrics(self, pair, pnl_eur):
         """Update per-pair win/loss counters and trigger loss-streak pause if needed.
 
@@ -1936,12 +2003,9 @@ class TradingBot:
                 short_change_percent = ((short_entry - current_price) / short_entry) * 100.0
                 if short_change_percent >= self.short_take_profit_percent:
                     return pair, "SHORT_TAKE_PROFIT", short_change_percent
-                if short_change_percent <= -abs(self.short_stop_loss_percent):
-                    return pair, "SHORT_HARD_STOP", short_change_percent
-                if self.enable_time_stop:
-                    opened_at = self.entry_timestamps.get(pair)
-                    if opened_at and (time.time() - opened_at) >= (self.time_stop_hours * 3600):
-                        return pair, "SHORT_TIME_STOP", short_change_percent
+                # Felix's rule: NEVER close a short at a loss. SHORT_HARD_STOP and
+                # SHORT_TIME_STOP are disabled so a losing short is held until it
+                # recovers into real net profit (handled by SHORT_TAKE_PROFIT above).
 
         return None, None, None
 
@@ -2659,17 +2723,31 @@ class TradingBot:
                                         f"SELL skipped for {best_pair}: profit target not reached ({pp_str}% < {req:.2f}%)"
                                     )
                             elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) <= 0:
-                                # Open short mostly in risk-off environments or very strong negative score
+                                # Open short ONLY in a confirmed downtrend (Felix's rule:
+                                # short only when trending down). Require BOTH a non-risk-on
+                                # regime AND a bearish 1h MTF trend, plus a sufficiently
+                                # negative score. This prevents shorting into a rising market.
                                 score = float(self.pair_scores.get(best_pair, 0.0))
-                                if (not self._is_risk_on_regime()) or score <= -self.min_buy_score:
+                                trend_bearish = not self._is_mtf_trend_bullish(best_pair)
+                                if trend_bearish and (not self._is_risk_on_regime()) and score <= -self.min_buy_score:
                                     self.execute_open_short_order(best_pair, price)
                                 else:
-                                    self.logger.info("SHORT skipped: regime not risk-off and sell score not strong enough")
+                                    self.logger.info(
+                                        f"SHORT skipped for {best_pair}: need downtrend "
+                                        f"(bearish={trend_bearish}, risk_off={not self._is_risk_on_regime()}, score={score:.2f})"
+                                    )
                             elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) > 0:
-                                # If already short, consider close on reversal buy impulse
-                                score = float(self.pair_scores.get(best_pair, 0.0))
-                                if score >= self.min_buy_score:
+                                # Close short ONLY on real net profit after fees (Felix's rule:
+                                # never close a short at a loss). The signal flip alone is not
+                                # enough — we require _can_close_short_profit_target.
+                                if self._can_close_short_profit_target(best_pair, price):
                                     self.execute_close_short_order(best_pair, price)
+                                else:
+                                    se = self.short_entry_prices.get(best_pair, 0.0)
+                                    spp = ((se - price) / se * 100.0) if se > 0 else 0.0
+                                    self.logger.info(
+                                        f"SHORT CLOSE skipped for {best_pair}: net profit target not reached ({spp:.2f}% gross)"
+                                    )
                             else:
                                 self._log_empty_sell_signal_throttled(best_pair)
 
