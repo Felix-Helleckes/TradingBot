@@ -14,6 +14,7 @@ max_drawdown_percent = 10.0
 stop_loss_percent = 99.0
 allocation_per_trade_percent = 20.0
 min_buy_score = 0.0
+min_short_score = 30.0
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = true
 mr_rsi_oversold_threshold = 30
@@ -92,8 +93,8 @@ enable_ws_feed = true
 
 [technical]
 enable_ema_crossover_filter = true
-ema_fast_period = 9
-ema_slow_period = 21
+ema_fast_period = 20
+ema_slow_period = 50
 enable_mtf_macd_filter = true
 enable_partial_exit = true
 # partial exit trigger (percent)
