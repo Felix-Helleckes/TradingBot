@@ -2679,9 +2679,6 @@ class TradingBot:
                             if self.sentiment_active:
                                 self.logger.info(f"BUY skipped for {best_pair}: sentiment guard active")
                                 continue
-                            if not self._is_mtf_trend_bullish(best_pair):
-                                self.logger.info(f"BUY skipped for {best_pair}: MTF trend (1h) is not bullish")
-                                continue
                             if not self._is_ema_trend_bullish(best_pair):
                                 # Log message is emitted inside the method
                                 continue
@@ -2725,16 +2722,25 @@ class TradingBot:
                             elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) <= 0:
                                 # Open short ONLY in a confirmed downtrend (Felix's rule:
                                 # short only when trending down). Require BOTH a non-risk-on
-                                # regime AND a bearish 1h MTF trend, plus a sufficiently
+                                # regime AND a bearish 1h EMA trend, plus a sufficiently
                                 # negative score. This prevents shorting into a rising market.
                                 score = float(self.pair_scores.get(best_pair, 0.0))
-                                trend_bearish = not self._is_mtf_trend_bullish(best_pair)
-                                if trend_bearish and (not self._is_risk_on_regime()) and score <= -self.min_buy_score:
+                                trend_bearish = not self._is_ema_trend_bullish(best_pair)
+                                # When regime filter is disabled, allow shorts on
+                                # bearish trend + negative score alone (Felix: short
+                                # only in confirmed downtrend).  When enabled, also
+                                # require the regime to be risk-off.
+                                risk_off_ok = (
+                                    not self._is_risk_on_regime()
+                                    if self.enable_regime_filter
+                                    else True
+                                )
+                                if trend_bearish and risk_off_ok and score <= -self.min_buy_score:
                                     self.execute_open_short_order(best_pair, price)
                                 else:
                                     self.logger.info(
                                         f"SHORT skipped for {best_pair}: need downtrend "
-                                        f"(bearish={trend_bearish}, risk_off={not self._is_risk_on_regime()}, score={score:.2f})"
+                                        f"(bearish={trend_bearish}, risk_off={risk_off_ok}, score={score:.2f})"
                                     )
                             elif self.enable_live_shorts and self.short_qty.get(best_pair, 0.0) > 0:
                                 # Close short ONLY on real net profit after fees (Felix's rule:

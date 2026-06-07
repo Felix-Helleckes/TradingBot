@@ -16,7 +16,7 @@ An automated, signal-driven spot trading bot for [Kraken](https://www.kraken.com
 - **Dual signal engine** — Mean-reversion (RSI) + trend breakout (Bollinger Bands)
 - **Smart entry filters** — volume filter, regime filter, score threshold, per-pair cooldowns
 - **Fee-aware exits** — take‑profit includes Kraken fee buffer (maker + taker)
-- **Risk controls** — ATR trailing stop, break‑even stop, hard stop‑loss, time‑stop, drawdown circuit breaker
+- **Risk controls** — ATR trailing stop, cooldowns, drawdown circuit breaker
 - **Regime filter** — switches to risk‑off sizing in bear markets (BTC benchmark)
 - **Bear Shield** — parks everything in FIAT when BTC drops below 4h EMA50
 - **Position recovery** — reconstructs holdings and PnL from Kraken trade history on restart
@@ -25,7 +25,7 @@ An automated, signal-driven spot trading bot for [Kraken](https://www.kraken.com
 - **Systemd service** — auto‑restart on crash, watchdog heartbeat, rate‑limiting
 - **Log rotation** — `RotatingFileHandler` keeps logs at ≤5 MB × 5 backups
 - **Short‑selling support** — leveraged shorts (configurable) with Felix’s rules:
-  - Open only in confirmed downtrend (Bearish MTF + risk‑off + negative score)
+  - Open only in confirmed downtrend (bearish EMA crossover + negative score)
   - Close only on real net profit after fees **or** on an early bullish signal (BUY) to avoid adverse moves
 - **Hot‑reload configuration** – `config.toml` is checked every 5 minutes and applied without restart
 
@@ -101,19 +101,17 @@ Each loop (~30 seconds) the bot:
 3. **Generates a signal score** using RSI (mean‑reversion) and Bollinger Bands (trend/breakout).
 4. **Applies entry filters**:
    - Volume ≥ 30 % of 20‑candle average
-   - Regime filter (BTC‑based RISK_ON/RISK_OFF)
+   - Regime filter (BTC‑based RISK_ON/RISK_OFF — derzeit deaktiviert)
    - Score threshold (`min_buy_score`)
    - Per‑pair and global cooldowns
-   - Bear Shield check (BTC < 4h EMA50 → all FIAT)
-   - MTF trend confirmation (1h SMA crossover) for longs / shorts
+   - EMA trend confirmation (1h EMA20/50 crossover) für Longs / Shorts
 5. **Executes the best‑scoring action**:
    - **Long**: opens a BUY if all guards pass and signal is BUY.
    - **Short**: opens a leveraged short only if:
      - Shorting enabled in config
-     - Confirmed bearish 1h MTF trend (`not _is_mtf_trend_bullish`)
-     - Risk‑off regime (`not _is_risk_on_regime`)
+     - Confirmed bearish 1h EMA trend (`not _is_ema_trend_bullish`)
      - Score ≤ `-min_buy_score`
-   - **Exit logic**:
+     - (Bei aktiviertem Regime-Filter zusätzlich: Risk‑off)\n   - **Exit logic**:
      - Longs are closed only when `_can_sell_profit_target` is true (real net profit after fees) **or** by a hard stop/ATR/time stop (these bypass the profit gate).
      - Shorts are closed when:
        - `_can_close_short_profit_target` is true (real net profit after fees) **OR**
@@ -128,20 +126,15 @@ All order placement goes through `kraken_interface.py`, which acquires an exclus
 
 | Control | Default | Description |
 |---------|---------|-------------|
-| Take‑profit (long) | 4.5 % + fees | Minimum gain before selling |
-| Take‑profit (short) | 2.5 % (config) | Minimum gain before buying back |
-| Hard stop‑loss | 2.5 % | Maximum loss per position (emergency exit) |
-| ATR trailing stop | 2.5 × ATR | Dynamic stop that ratchets up with price |
-| Break‑even stop | enabled | Moves SL to entry after 1.5 % gain |
-| Time‑stop | 16 h | Forces exit after max holding period |
+| Take‑profit (long) | 3.0 % + fees | Minimum gain before selling |
+| Take‑profit (short) | 1.5 % | Minimum gain before buying back |
+| ATR trailing stop | 2.0 × ATR | Dynamic stop that ratchets up with price |
 | Trade cooldown | 60 min/pair | Prevents overtrading the same instrument |
-| Global cooldown | 30 min | Minimum gap between any two trades |
-| Max open positions | 2 | Limits concurrent exposure |
+| Global cooldown | 60 min | Minimum gap between any two trades |
+| Max open positions | 1 | Limits concurrent exposure |
 | Drawdown circuit breaker | 10 % portfolio | Pauses buys after large portfolio drop |
-| Loss‑streak pause | 3 losses | 60 min cooldown after consecutive losses |
-| Bear Shield | enabled | Parks in FIAT when BTC < 4h EMA50 |
 | Short‑selling leverage | 2.0× (config) | Leverage for leveraged shorts |
-| Max short notional | 50 EUR (config) | Cap per‑short to limit tail risk |
+| Max short notional | 25 EUR (config) | Cap per‑short to limit tail risk |
 
 ---
 
@@ -164,14 +157,15 @@ Logs are rotated automatically by Python’s `RotatingFileHandler` (5 MiB per 
 
 ---
 
-## 📅 Recent Changes (2026‑06‑03)
+## 📅 Recent Changes
 
-- **Added early short‑close on bullish signal**: When a BUY signal appears while a short is open, the bot now closes the short immediately (regardless of current PnL) to avoid adverse moves. This complements the existing profit‑target‑only close rule.
-- **Updated `trading_bot.py`** – inserted the early‑close logic in the short‑handling block.
-- **Verified systemd service** – after a stale lock file cleanup, `kraken-bot.service` starts cleanly and runs.
-- **Rebased and pushed** – all changes committed and pushed to the `auto/per-symbol-dot-20260529` branch on GitHub.
+See **[CHANGELOG.md](./CHANGELOG.md)** for the full history.
 
-For a full history see [CHANGELOG.md](./CHANGELOG.md).
+**2026‑06‑07** — Bugfixes: Short-Blocker (Regime-Filter) & Doppelfilter (MTF vs EMA) behoben. Config vereinfacht. Watchdog + Daily-Report per Cron.
+
+**2026‑06‑03** — Early Short‑Close auf BUY‑Signal. Systemd‑Service stabilisiert.
+
+**2026‑06‑02** — Short‑Logik (Downtrend‑Only + Net‑Profit‑Only), Airbag deaktiviert.
 
 ---
 
