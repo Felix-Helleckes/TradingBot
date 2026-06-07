@@ -6,22 +6,21 @@ secret = ""
 base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 60
-trade_pairs = [ "XBTEUR", "ETHEUR", "SOLEUR", "XRPEUR" ]
-allocation_per_trade_percent = 20.0
+trade_pairs = [ "XXBTZEUR" ]
 
 [risk_management]
 max_drawdown_percent = 10.0
 stop_loss_percent = 99.0
-allocation_per_trade_percent = 20.0
+allocation_per_trade_percent = 40
 min_buy_score = 0.0
 min_short_score = 30.0
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = true
 mr_rsi_oversold_threshold = 30
 mr_rsi_overbought_threshold = 55
-enable_regime_filter = false
+enable_regime_filter = true
 regime_benchmark_pair = "XBTEUR"
-regime_min_score = -10.0
+regime_min_score = -2.0
 enable_mtf_regime_scoring = false
 mtf_regime_min_score = -5.0
 enable_hard_stop_loss = false
@@ -39,35 +38,35 @@ volume_filter_min_ratio = 0.2
 enable_time_stop = false
 time_stop_hours = 9999
 enable_daily_drawdown = true
-    daily_loss_limit_percent = 5.0
+    daily_loss_limit_percent = 20.0
 risk_off_allocation_multiplier = 0.5
-enable_volatility_targeting = true
+enable_volatility_targeting = false
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # NOTE: pause_after_loss_streak_minutes set to 0 to remove cooling period
 
-take_profit_percent = 4.0
+take_profit_percent = 3.0
 adaptive_take_profit = false
 max_take_profit_percent = 0.0
-sell_fee_buffer_percent = 0.55
+sell_fee_buffer_percent = 0.26
 fees_maker_percent = 0.16
 fees_taker_percent = 0.26
 reentry_guard_pairs = [ "VER",]
 min_reentry_profit_pct = 0.0
-min_net_sell_profit_pct = 0.75
+min_net_sell_profit_pct = 0.2
 exit_slippage_buffer_pct = 0.35
-enable_atr_stop = false
+enable_atr_stop = true
     atr_period = 20
-    atr_multiplier = 3.0
-    atr_trail_multiplier = 2.0
+    atr_multiplier = 2.0
+    atr_trail_multiplier = 1.0
     enable_atr_dynamic_tp = true
-    atr_tp_multiplier = 1.5
+    atr_tp_multiplier = 1.0
 enable_pyramiding = false
 pyramiding_add_pct = 0.5
 max_open_positions = 1
-trade_cooldown_seconds = 3600
-global_trade_cooldown_seconds = 3600
+trade_cooldown_seconds = 60
+global_trade_cooldown_seconds = 60
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 1.0
 min_free_margin_buffer = 0.0
@@ -103,11 +102,11 @@ partial_exit_fraction = 0.5
 partial_exit_min_remaining_eur = 5.0
 
 [daytrading]
-enable_daytrading = true
-max_hold_hours = 9999
-intraday_sl_percent = 99.0
-intraday_tp_percent = 1.8
-intraday_cooldown_seconds = 1800
+enable_daytrading = false
+max_hold_hours = 4
+intraday_sl_percent = 1.5
+intraday_tp_percent = 2.0
+intraday_cooldown_seconds = 300
 max_consecutive_losses = 2
 loss_streak_pause_minutes = 60
 # NOTE: loss_streak_pause_minutes set to 0 to remove cooling period
@@ -119,7 +118,6 @@ loss_streak_pause_minutes = 60
 [symbols.DOTEUR]
 intraday_sl_percent = 2.5
 intraday_tp_percent = 3.0
-
 
 [bear_shield]
 enable_bear_shield = false
@@ -135,8 +133,8 @@ leverage = "2"
 # Max notional per short to limit exposure — start small for safety
 max_short_notional_eur = 25.0
 # Take-profit and stop-loss for shorts (percent)
-short_take_profit_percent = 1.0
-short_stop_loss_percent = 3.5
+short_take_profit_percent = 1.5
+short_stop_loss_percent = 99.0
 
 [logging]
 log_level = "INFO"
@@ -163,7 +161,7 @@ nas_root = "/mnt/fritz_nas/Volume/kraken"
 nas_ohlc_2026 = "/mnt/fritz_nas/Volume/kraken/2026"
 nas_ohlc_2025 = "/mnt/fritz_nas/Volume/kraken/2025/ohlcvt"
 nas_bot_cache = "/mnt/fritz_nas/Volume/kraken/bot_cache"
-local_history_buffer = "data/history_buffer.json"
+local_history_buffer = "/mnt/fritz_nas/Volume/kraken/data/history_buffer.json"
 
 [telegram]
 bot_token = ""

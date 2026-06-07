@@ -49,20 +49,28 @@ _RM = _CFG.get("risk_management", {})
 # Signal engine params (read from config, same as analysis.py)
 _ENABLE_MR = bool(_RM.get("enable_mean_reversion_signals", True))
 _ENABLE_TREND = bool(_RM.get("enable_trend_breakout_signals", True))
-_MR_OVERSOLD = float(_RM.get("mr_rsi_oversold_threshold", 33.0))
-_MR_OVERBOUGHT = float(_RM.get("mr_rsi_overbought_threshold", 67.0))
+_MR_OVERSOLD = float(_RM.get("mr_rsi_oversold_threshold", 30.0))
+_MR_OVERBOUGHT = float(_RM.get("mr_rsi_overbought_threshold", 70.0))
 
 # Risk/position params from config
-_MIN_BUY_SCORE = float(_RM.get("min_buy_score", 8.0))
-_TRADE_COOLDOWN_SEC = int(_RM.get("trade_cooldown_seconds", 3600))
+_MIN_BUY_SCORE = float(_RM.get("min_buy_score", 0.0))
+_TRADE_COOLDOWN_SEC = int(_RM.get("trade_cooldown_seconds", 60))
 _RISK_OFF_MULT = float(_RM.get("risk_off_allocation_multiplier", 0.50))
-_REGIME_MIN_SCORE = float(_RM.get("regime_min_score", -10.0))
+_REGIME_MIN_SCORE = float(_RM.get("regime_min_score", 0.0))
 # ATR dynamic TP: floor = _ATR_TP_MULT × ATR% of close prices (prevents early exits)
 _ENABLE_ATR_TP = bool(_RM.get("enable_atr_dynamic_tp", True))
 _ATR_TP_MULT = float(_RM.get("atr_tp_multiplier", 2.0))
-_BASE_TP_PCT = float(_RM.get("take_profit_percent", 3.0))
-_MAX_TP_PCT = float(_RM.get("max_take_profit_percent", 7.0))
+_BASE_TP_PCT = float(_RM.get("take_profit_percent", 5.0))
+_MAX_TP_PCT = float(_RM.get("max_take_profit_percent", 10.0))
 _ATR_PERIOD = int(_RM.get("atr_period", 14))
+_STOP_LOSS_PCT = float(_RM.get("stop_loss_percent", 99.0))
+# Sanity checks for backtest: if config gives nonsensical values, replace with reasonable defaults
+if _MAX_TP_PCT <= 0.0:
+    _MAX_TP_PCT = 10.0
+if _BASE_TP_PCT <= 0.0:
+    _BASE_TP_PCT = 5.0
+if _BASE_TP_PCT > _MAX_TP_PCT:
+    _BASE_TP_PCT = _MAX_TP_PCT * 0.9
 
 # Read pairs from live config so backtest matches the real bot's universe
 PAIRS = _CFG.get("bot_settings", {}).get("trade_pairs", ["XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR"])
@@ -520,7 +528,14 @@ def run_backtest(
                 if position.tag == "scalp"
                 else (dt_tp_func(list(hist[p])) if dt_enabled else _atr_dynamic_tp(list(hist[p])))
             )
-            sl = -0.8 if position.tag == "scalp" else (dt_sl if dt_enabled else -3.0)
+            # Use configured stop loss if sane (<=20%), else fallback 2.0% for non-scalp,non-daytrading
+            if position.tag == "scalp":
+                sl = -0.8
+            else:
+                if dt_enabled:
+                    sl = dt_sl
+                else:
+                    sl = -_STOP_LOSS_PCT if 0.0 < _STOP_LOSS_PCT <= 20.0 else -2.0
             max_hold_h = 6 if position.tag == "scalp" else (dt_max_hold_h if dt_enabled else 48)
 
             if pnl_pct >= tp or pnl_pct <= sl or held_hours >= max_hold_h:

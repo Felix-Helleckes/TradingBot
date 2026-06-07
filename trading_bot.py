@@ -293,7 +293,7 @@ class TradingBot:
 
         self.start_time = datetime.now()
         self.last_config_reload = datetime.now()
-        self.config_reload_interval = 300
+        self.config_reload_interval = 60
         self.loop_interval_sec = int(self.config.get('bot_settings', {}).get('loop_interval_seconds', 60))
         self.daily_start_balance = None
         self.initial_balance_eur = None
