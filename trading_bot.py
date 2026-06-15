@@ -213,7 +213,10 @@ class TradingBot:
         self.trade_cooldown_sec = int(self.config.get('risk_management', {}).get('trade_cooldown_seconds', 180))
         self.global_trade_cooldown_sec = int(self.config.get('risk_management', {}).get('global_trade_cooldown_seconds', 300))
         self.trailing_stop_percent = float(self.config.get('risk_management', {}).get('trailing_stop_percent', 1.5))
-        self.min_buy_score = float(self.config.get('risk_management', {}).get('min_buy_score', 18.0))
+        self.min_buy_score = float(self.config.get("risk_management", {}).get("min_buy_score", 18.0))
+        print("DEBUG: min_buy_score:", self.min_buy_score)
+        self.logger.error("MIN_BUY_SCORE DEBUG: %s", self.min_buy_score)
+        self.logger.info(f"min_buy_score loaded: {self.min_buy_score}")
         self.adaptive_tp_enabled = bool(self.config.get('risk_management', {}).get('adaptive_take_profit', True))
         self.max_tp_percent = float(self.config.get('risk_management', {}).get('max_take_profit_percent', 14.0))
         self.sell_fee_buffer_percent = float(self.config.get('risk_management', {}).get('sell_fee_buffer_percent', 0.0))
@@ -2512,17 +2515,10 @@ class TradingBot:
                     if risk_pair:
                         price = self.pair_prices.get(risk_pair, 0)
                         print(f"\n[{risk_type}] {risk_pair} at {change:.2f}%")
-                        if str(risk_type).startswith("SHORT_"):
-                            self.execute_close_short_order(risk_pair, price)
-                        else:
-                            # Emergency exits (stops, time, break-even) bypass the TP gate
-                            # Only TAKE_PROFIT type requires the profit gate
-                            _stop_types = {"ATR", "ATR_TRAIL", "HARD_STOP", "BREAK_EVEN",
-                                           "TIME_STOP", "TRAILING_STOP"}
-                            _require_tp = risk_type not in _stop_types
-                            self.execute_sell_order(risk_pair, price,
-                                                    require_profit_target=_require_tp,
-                                                    reason=risk_type)
+                        # All exits require profit target
+                        self.execute_sell_order(risk_pair, price,
+                                                require_profit_target=True,
+                                                reason=risk_type)
 
                     # ── Partial take-profit exit ─────────────────────────────
                     # Fires ONCE per entry when unrealised profit reaches
@@ -2708,6 +2704,7 @@ class TradingBot:
                                     self.logger.debug(f"Re-entry guard check error for {best_pair}: {_e}")
                                 self.execute_buy_order(best_pair, price)
                         elif best_signal == "SELL":
+                            print("SHORT block reached", flush=True)
                             min_vol = self._get_min_volume(best_pair)
                             if self.holdings.get(best_pair, 0) >= min_vol:
                                 if self._can_sell_profit_target(best_pair, price):
