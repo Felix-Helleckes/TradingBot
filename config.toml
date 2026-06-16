@@ -1,6 +1,6 @@
 stop_loss_percent = 99.0
-trade_cooldown_seconds = 100
-global_trade_cooldown_seconds = 100
+trade_cooldown_seconds = 0
+global_trade_cooldown_seconds = 0
 
 [kraken_api]
 key = ""
@@ -48,7 +48,7 @@ risk_off_allocation_multiplier = 0.5
 enable_volatility_targeting = false
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
-pause_after_loss_streak_minutes = 60
+pause_after_loss_streak_minutes = 0
 take_profit_percent = 2.0
 adaptive_take_profit = false
 max_take_profit_percent = 0.0
@@ -68,8 +68,8 @@ atr_tp_multiplier = 1.0
 enable_pyramiding = false
 pyramiding_add_pct = 0.5
 max_open_positions = 10
-trade_cooldown_seconds = 80
-global_trade_cooldown_seconds = 80
+trade_cooldown_seconds = 0
+global_trade_cooldown_seconds = 0
 empty_sell_log_cooldown_seconds = 1800
 min_trade_eur = 1.0
 min_free_margin_buffer = 0.0
