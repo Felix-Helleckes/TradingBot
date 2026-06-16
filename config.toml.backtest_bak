@@ -7,12 +7,11 @@ base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 60
 trade_pairs = [ "XXBTZEUR" ]
-allocation_per_trade_percent = 10
 
 [risk_management]
 max_drawdown_percent = 10.0
 stop_loss_percent = 99.0
-allocation_per_trade_percent = 10
+allocation_per_trade_percent = 60
 min_buy_score = 0.0
 min_short_score = 30.0
 enable_mean_reversion_signals = true
@@ -24,8 +23,8 @@ regime_benchmark_pair = "XBTEUR"
 regime_min_score = -2.0
 enable_mtf_regime_scoring = false
 mtf_regime_min_score = -5.0
-enable_hard_stop_loss = true
-hard_stop_loss_percent = 1.0
+enable_hard_stop_loss = false
+hard_stop_loss_percent = 99.0
 enable_break_even = true
 break_even_trigger_percent = 1.5
 airbag_drop_threshold = 99.0
@@ -39,23 +38,23 @@ volume_filter_min_ratio = 0.2
 enable_time_stop = false
 time_stop_hours = 9999
 enable_daily_drawdown = true
-    daily_loss_limit_percent = 5.0
+    daily_loss_limit_percent = 20.0
 risk_off_allocation_multiplier = 0.5
-enable_volatility_targeting = true
+enable_volatility_targeting = false
 target_volatility_pct = 1.6
 max_consecutive_losses = 3
 pause_after_loss_streak_minutes = 60
 # NOTE: pause_after_loss_streak_minutes set to 0 to remove cooling period
 
-take_profit_percent = 3.0
+take_profit_percent = 1.5
 adaptive_take_profit = false
 max_take_profit_percent = 0.0
-sell_fee_buffer_percent = 0.55
+sell_fee_buffer_percent = 0.26
 fees_maker_percent = 0.16
 fees_taker_percent = 0.26
 reentry_guard_pairs = [ "VER",]
 min_reentry_profit_pct = 0.0
-min_net_sell_profit_pct = 0.75
+min_net_sell_profit_pct = 0.2
 exit_slippage_buffer_pct = 0.35
 enable_atr_stop = true
     atr_period = 20
@@ -134,8 +133,8 @@ leverage = "2"
 # Max notional per short to limit exposure — start small for safety
 max_short_notional_eur = 25.0
 # Take-profit and stop-loss for shorts (percent)
-short_take_profit_percent = 1.0
-short_stop_loss_percent = 3.5
+short_take_profit_percent = 1.5
+short_stop_loss_percent = 99.0
 
 [logging]
 log_level = "INFO"

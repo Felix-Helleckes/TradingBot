@@ -2,7 +2,6 @@
 Description=Kraken Trading Bot
 After=network-online.target
 Wants=network-online.target
-# Stop restarting after 5 failures within 5 minutes (prevents CPU-thrashing on persistent bugs)
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -10,24 +9,15 @@ StartLimitBurst=5
 Type=simple
 User=felix
 WorkingDirectory=/home/felix/tradingbot
-
+ExecStartPre=/bin/rm -f /tmp/kraken_bot.lock /tmp/hermes_bot_start.pid /tmp/kraken_order_executor.lock
 ExecStart=/home/felix/tradingbot/venv/bin/python /home/felix/tradingbot/main.py
 Restart=always
-# Longer restart delay avoids CPU-thrashing when Kraken API is down
 RestartSec=30
-
-# Raspberry Pi resource protection:
-# Bot process is protected from OOM-killer (low score = protected)
 OOMScoreAdj=-100
-# Hard memory limit; prevents slow memory leaks from consuming all Pi RAM
 MemoryMax=400M
-# Forward stdout/stderr to journald for easy access via: journalctl -u kraken-bot -f
-StandardOutput=journal
-StandardError=journal
-# Weekly restart to clear any accumulated memory fragmentation
+StandardOutput=append:/home/felix/tradingbot/logs/bot_stdout.log
+StandardError=append:/home/felix/tradingbot/logs/bot_stderr.log
 RuntimeMaxSec=604800
-# Watchdog: systemd kills + restarts the bot if it stops sending pings within 120s
-WatchdogSec=120
 
 [Install]
 WantedBy=multi-user.target

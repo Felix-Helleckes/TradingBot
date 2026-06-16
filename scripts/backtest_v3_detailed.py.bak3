@@ -532,9 +532,11 @@ def run_backtest(
             if position.tag == "scalp":
                 sl = -0.8
             else:
-                # Diamond Hands Rule: Never realize a loss. No fallback SL, no time stop.
-                sl = -99.0
-            max_hold_h = 9999  # Hold indefinitely until TP is hit
+                if dt_enabled:
+                    sl = dt_sl
+                else:
+                    sl = -_STOP_LOSS_PCT if 0.0 < _STOP_LOSS_PCT <= 20.0 else -2.0
+            max_hold_h = 6 if position.tag == "scalp" else (dt_max_hold_h if dt_enabled else 48)
 
             if pnl_pct >= tp or pnl_pct <= sl or held_hours >= max_hold_h:
                 slip = slippage_bps / 10000.0

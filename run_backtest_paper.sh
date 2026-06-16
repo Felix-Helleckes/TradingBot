@@ -14,7 +14,7 @@ mkdir -p "$(dirname "$JSON_OUT")"
 
 echo "Paper Backtest run at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > "$OUT"
 
-/home/felix/tradingbot/venv/bin/python - <<'PY' >> "$OUT" 2>&1
+/home/felix/tradingbot/venv/bin/python - <<PY >> "$OUT" 2>&1
 import sys, toml, os
 sys.path.insert(0, '/home/felix/tradingbot')
 from trading_bot import Backtester

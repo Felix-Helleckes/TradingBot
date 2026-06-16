@@ -21,8 +21,7 @@ try:
 except Exception:  # pragma: no cover
     fcntl = None
 CONFIG_PATH = "config.toml"
-INSTANCE = os.environ.get("KRAKEN_INSTANCE", "live")
-LOCK_FILE = f"/tmp/kraken_bot_{INSTANCE}.lock"
+LOCK_FILE = "/tmp/kraken_bot.lock"
 _lock_fp = None
 
 
