@@ -11,12 +11,12 @@ base_currency = "EUR"
 auto_select_pair = true
 loop_interval_seconds = 30
 trade_pairs = [ "XXBTZEUR", "XETHZEUR", "SOLEUR", "XXRPZEUR",]
-allocation_per_trade_percent = 25.0
+allocation_per_trade_percent = 50.0
 
 [risk_management]
 max_drawdown_percent = 10.0
 stop_loss_percent = 99.0
-allocation_per_trade_percent = 25.0
+allocation_per_trade_percent = 50.0
 min_buy_score = 12
 enable_mean_reversion_signals = true
 enable_trend_breakout_signals = true
@@ -71,7 +71,7 @@ max_open_positions = 10
 trade_cooldown_seconds = 0
 global_trade_cooldown_seconds = 0
 empty_sell_log_cooldown_seconds = 1800
-min_trade_eur = 5.0
+min_trade_eur = 10.0
 min_free_margin_buffer = 0.0
 max_notional_per_side = 10000.0
 max_open_positions_per_side = 5
