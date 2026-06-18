@@ -49,20 +49,21 @@ class TechnicalAnalysis:
     Supports multi-pair analysis with separate price history per pair.
     """
 
-    def __init__(self, rsi_period=14, sma_short=20, sma_long=50, min_volatility_pct=0.15):
+    def __init__(self, rsi_period=14, sma_short=20, sma_long=50, min_volatility_pct=0.15, bb_std_dev=2.0):
         self.rsi_period = rsi_period
         self.sma_short = sma_short
         self.sma_long = sma_long
         self.min_volatility_pct = min_volatility_pct
         self.logger = logging.getLogger(__name__)
         self.pair_price_history = {}
-        self.max_history = 200  # 200 ticks → SMA50 uses 50/200; better context than 65
+        self.max_history = 60000  # increased for longer history and EWMA volatility, enough for ~200-day SMA
         self.buffer_path = os.path.join(os.path.dirname(__file__), 'data', 'history_buffer.json')
         # Signal engine mode flags (pushed from TradingBot after config load)
         self.enable_mr_signals = True    # mean-reversion: RSI oversold/overbought
         self.enable_trend_signals = True # trend/breakout: Bollinger Band momentum
         self.mr_rsi_buy = 33.0           # RSI <= threshold triggers mean-reversion BUY
         self.mr_rsi_sell = 67.0          # RSI >= threshold triggers mean-reversion SELL
+        self.bb_std_dev = bb_std_dev     # Bollinger Band standard deviation multiplier
         # Price-action pattern helpers (lightweight): when enabled, detect 2/3-bar patterns
         # from synthetic or NAS 5m bars and boost/confirm signals. Disabled by default.
         self.enable_price_action = True
@@ -127,6 +128,7 @@ class TechnicalAnalysis:
         NAS folder mapping: XBTEUR→XXBTZEUR, ETHEUR→XETHZEUR, XRPEUR→XXRPZEUR,
         SOLEUR→SOLEUR (same).
         Only seeds if history is still too sparse (< sma_long).
+        Loads data from all available years, oldest first, until buffer full.
         """
         import csv
         from pathlib import Path
@@ -145,35 +147,43 @@ class TechnicalAnalysis:
             return  # buffer already full
 
         folder = folder_map.get(pair, pair)
-        import datetime
-        year = datetime.datetime.utcnow().year
-        csv_path = Path(nas_root) / str(year) / folder / 'ohlc_5m.csv'
-        if not csv_path.exists():
-            return
+        # Determine available years, sorted ascending (oldest first)
+        years = []
         try:
-            closes = []
-            with open(csv_path, newline='') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        closes.append(float(row['close']))
-                    except (KeyError, ValueError):
-                        continue
-            if not closes:
-                return
-            # Prepend NAS data (older) before current live history
-            needed = self.max_history - len(history)
-            nas_closes = closes[-needed:] if needed < len(closes) else closes
-            existing = list(history)
+            years = sorted([int(p.name) for p in Path(nas_root).iterdir()
+                            if p.is_dir() and p.name.isdigit()])
+        except Exception:
+            years = []
+        needed = self.max_history - len(history)
+        collected = []
+        for y in years:
+            csv_path = Path(nas_root) / str(y) / folder / 'ohlc_5m.csv'
+            if not csv_path.exists():
+                continue
+            try:
+                with open(csv_path, newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            collected.append(float(row['close']))
+                        except (KeyError, ValueError):
+                            continue
+                if len(collected) >= needed:
+                    # we have enough older data; break after collecting needed
+                    break
+            except Exception as e:
+                self.logger.warning(f"[NAS seed] {pair}: failed to seed from {csv_path}: {e}")
+        if collected:
+            # Take the most recent 'needed' from collected (to keep as close to present as possible)
+            # but we want older data first, so we take the last 'needed' items (which are the newest of the older data)
+            to_add = collected[-needed:] if len(collected) >= needed else collected
+            existing = list(history)  # copy current history
             history.clear()
-            for c in nas_closes:
-                history.append(c)
-            for c in existing:
-                history.append(c)
+            history.extend(to_add)
+            history.extend(existing)
+            # deque will automatically enforce maxlen
             self._save_history(force=True)
-            self.logger.info(f"[NAS seed] {pair}: prepended {len(nas_closes)} closes → buffer={len(history)}/{self.max_history}")
-        except Exception as e:
-            self.logger.warning(f"[NAS seed] {pair}: failed to seed from {csv_path}: {e}")
+            self.logger.info(f"[NAS seed] {pair}: prepended {len(to_add)} closes → buffer={len(history)}/{self.max_history}")
 
     def seed_from_ohlc(self, pair, closes):
         """Pre-populate price history from OHLC candle closes.
@@ -325,6 +335,25 @@ class TechnicalAnalysis:
         except Exception:
             return None
 
+    def calculate_ewma_vol(self, pair, span_days=30):
+        """Calculate EWMA volatility (as percent price change per tick) over given span.
+        Returns volatility as a float (percent).
+        """
+        history = self._get_price_history(pair)
+        if len(history) < 2:
+            return 0.0
+        closes = np.array(list(history), dtype=float)
+        # simple returns
+        returns = np.diff(closes) / closes[:-1]
+        # EWMA variance
+        alpha = 2.0 / (span_days * 288 + 1)  # span in ticks
+        ewma_var = np.zeros_like(returns)
+        ewma_var[0] = returns[0] ** 2
+        for i in range(1, len(returns)):
+            ewma_var[i] = alpha * returns[i] ** 2 + (1 - alpha) * ewma_var[i - 1]
+        vol = np.sqrt(ewma_var[-1]) * 100.0  # percent per tick
+        return vol
+
     def check_mtf_trend(self, prices, short_p=20, long_p=50):
         """Check if the general trend is bullish on the provided history."""
         if len(prices) < long_p:
@@ -366,8 +395,8 @@ class TechnicalAnalysis:
             std20 = np.std(prices[-20:])
             sma50 = np.mean(prices[-50:])
             
-            upper_bb = sma20 + (2.0 * std20)
-            lower_bb = sma20 - (2.0 * std20)
+            upper_bb = sma20 + (self.bb_std_dev * std20)
+            lower_bb = sma20 - (self.bb_std_dev * std20)
             
             current_price = prices[-1]
             signal = "HOLD"

@@ -12,6 +12,16 @@ An automated, signal-driven spot trading bot for [Kraken](https://www.kraken.com
 
 ## ✨ Features
 
+## ⚙️ Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `bb_std_dev` (under `[technical]`) | `2.0` | Standard deviation multiplier for Bollinger Bands. Controls width of bands. |
+| `enable_long_term_regime_filter` (under `[risk_management]`) | `false` | When true, prevents buying when long‑term SMA crossover indicates bearish trend. |
+| `long_term_fast_ma` (under `[risk_management]`) | `50` | Fast SMA period (in days) for long‑term regime filter. |
+| `long_term_slow_ma` (under `[risk_management]`) | `200` | Slow SMA period (in days) for long‑term regime filter. |
+| `long_term_regime_pair` (under `[risk_management]`) | `"XXBTZEUR"` | Pair used for long‑term regime calculation (default BTC/EUR). |
+| `ewma_volatility_span_days` (under `[risk_management]`) | `30` | Look‑back span (in days) for the exponential weighted moving average volatility used in position sizing.
 - **Multi-pair trading** — BTC, ETH, SOL, XRP (EUR pairs, configurable)
 - **Dual signal engine** — Mean-reversion (RSI) + trend breakout (Bollinger Bands)
 - **Smart entry filters** — volume filter, regime filter, score threshold, per-pair cooldowns

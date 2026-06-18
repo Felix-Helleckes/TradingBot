@@ -137,8 +137,14 @@ class TradingBot:
         self.config_path = os.path.join(os.path.dirname(__file__), 'config.toml')
         self.logger = logging.getLogger(__name__)
         self.nas_root = _resolve_nas_root(config)
+        self.bb_std_dev = float(self.config.get('technical', {}).get('bb_std_dev', 2.0))
+        self.enable_long_term_regime_filter = bool(self.config.get('risk_management', {}).get('enable_long_term_regime_filter', False))
+        self.long_term_fast_ma = int(self.config.get('risk_management', {}).get('long_term_fast_ma', 50))
+        self.long_term_slow_ma = int(self.config.get('risk_management', {}).get('long_term_slow_ma', 200))
+        self.long_term_regime_pair = str(self.config.get('risk_management', {}).get('long_term_regime_pair', 'XXBTZEUR')).upper()
+        self.ewma_span = int(self.config.get('risk_management', {}).get('ewma_volatility_span_days', 30))
 
-        self.analysis_tool = TechnicalAnalysis(rsi_period=14, sma_short=20, sma_long=50)
+        self.analysis_tool = TechnicalAnalysis(rsi_period=14, sma_short=20, sma_long=50, bb_std_dev=self.bb_std_dev)
 
         # Signal engine mode: mean-reversion (reversion_bias) and/or trend/breakout (BB)
         self.enable_mr_signals = bool(self.config.get('risk_management', {}).get('enable_mean_reversion_signals', True))
@@ -427,9 +433,9 @@ class TradingBot:
         return ema
 
     def _is_bear_market(self):
-        """Return True when the 4h trend has confirmed a downtrend for bear_confirm_candles.
+        """Return True when the daily trend has confirmed a downtrend for bear_confirm_candles.
 
-        Logic: fetch 4h OHLC for bear_benchmark_pair, compute EMA(bear_ema_period).
+        Logic: fetch daily OHLC for bear_benchmark_pair, compute EMA(bear_ema_period).
                If the last bear_confirm_candles closes are ALL below EMA → bear mode.
                If price crosses back above EMA → bull mode restored.
         Fails safe: returns False (allow trading) if API call fails.
@@ -437,7 +443,7 @@ class TradingBot:
         if not self.enable_bear_shield:
             return False
         try:
-            ohlc = self.api_client.get_ohlc_data(self.bear_benchmark_pair, interval=240)  # 4h
+            ohlc = self.api_client.get_ohlc_data(self.bear_benchmark_pair, interval=1440)  # daily
             if not ohlc:
                 return False
             key = [k for k in ohlc.keys() if k != 'last']
@@ -1412,30 +1418,44 @@ class TradingBot:
         score = float(self.pair_scores.get(benchmark, 0.0))
         return score >= self.regime_min_score
 
-    def _benchmark_volatility_pct(self):
-        bench = self.regime_benchmark_pair
-        aliases = [bench, bench.replace('/', '')]
-        # analysis stores histories by raw Kraken key seen in ticker payload
-        if bench == 'XBTEUR':
-            aliases += ['XXBTZEUR']
-        if bench == 'ETHEUR':
-            aliases += ['XETHZEUR']
 
+    def _is_long_term_bear(self, pair):
+        """Return True when the long-term regime is bearish (fast MA < slow MA)."""
+        if not self.enable_long_term_regime_filter:
+            return False
+        # Use the configured pair for regime (default XXBTZEUR)
+        regime_pair = self.long_term_regime_pair
+        # Get price history
+        history = self.analysis_tool._get_price_history(regime_pair)
+        if len(history) < self.long_term_slow_ma * 288:  # approx ticks per day
+            # Not enough data, assume not bearish
+            return False
+        # Convert deque to list for slicing
+        closes = list(history)
+        # Calculate SMA
+        fast_ticks = self.long_term_fast_ma * 288
+        slow_ticks = self.long_term_slow_ma * 288
+        if len(closes) < slow_ticks:
+            return False
+        fast_sma = sum(closes[-fast_ticks:]) / fast_ticks
+        slow_sma = sum(closes[-slow_ticks:]) / slow_ticks
+        return fast_sma < slow_sma
+
+    def _benchmark_volatility_pct(self):
+        self.logger.info("Enter _benchmark_volatility_pct")
+        """Return EWMA volatility (percent) for the benchmark pair.
+        
+        Uses an exponential weighted moving average of squared returns over
+        the last N days (configurable via ewma_volatility_span_days). Falls back
+        to 0.0 on failure.
+        """
         try:
-            history = None
-            for key in aliases:
-                history = self.analysis_tool.pair_price_history.get(key)
-                if history and len(history) >= 20:
-                    break
-            if not history or len(history) < 20:
-                return 0.0
-            prices = list(history)[-20:]
-            mean = sum(prices) / len(prices)
-            if mean <= 0:
-                return 0.0
-            variance = sum((p - mean) ** 2 for p in prices) / len(prices)
-            return ((variance ** 0.5) / mean) * 100.0
+            # delegate to analysis tool's EWMA volatility
+            vol = self.analysis_tool.calculate_ewma_vol(self.regime_benchmark_pair, span_days=self.ewma_span)
+            self.logger.info(f"EWMA volatility for {self.regime_benchmark_pair}: {vol:.4f}%")
+            return vol
         except Exception:
+            self.logger.exception("Failed to compute EWMA volatility")
             return 0.0
 
     def _allocation_multiplier(self):
@@ -2401,7 +2421,7 @@ class TradingBot:
                 if self._check_airbag_trigger(pair):
                     # Panic sell if holding
                     if self.holdings.get(pair, 0) >= self._get_min_volume(pair):
-                        self.execute_sell_order(pair, current_price, require_profit_target=False, reason="CRASH_AIRBAG")
+                        self.execute_sell_order(pair, current_price, require_profit_target=True, reason="CRASH_AIRBAG")
 
                 # Use cached hourly signals (refreshed periodically) when present
                 sig = self.pair_signals.get(pair)
@@ -2668,7 +2688,12 @@ class TradingBot:
                             except Exception:
                                 pass
 
-                            # Expensive checks only now
+                             # Long-term regime filter (cached)
+                            # Long-term regime filter (cached)
+                            if self.enable_long_term_regime_filter and self._is_long_term_bear(best_pair):
+                                self.logger.info("BUY skipped: long-term regime filter is BEARISH (cached)")
+                                continue
+                            
                             if self._bear_mode_active:
                                 self.logger.info("BUY skipped: BEAR SHIELD active (parked in FIAT)")
                                 continue

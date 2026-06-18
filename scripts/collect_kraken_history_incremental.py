@@ -15,7 +15,9 @@ from utils import nas_paths
 PAIRS = ["XXBTZEUR", "XETHZEUR", "SOLEUR", "ADAEUR", "DOTEUR", "XXRPZEUR", "LINKEUR"]
 INTERVALS = [1, 15, 60]
 _NAS = nas_paths()
-BASE_DIR = Path(os.getenv("COLLECT_BASE_DIR", str(_NAS["ohlc_2026"])))
+nas_root = _NAS["nas_root"]
+year = datetime.now(timezone.utc).year
+BASE_DIR = Path(os.getenv("COLLECT_BASE_DIR", str(nas_root / str(year))))
 STATE_DIR = BASE_DIR / "_state"
 STATE_FILE = STATE_DIR / "collector_state.json"
 LOG_FILE = BASE_DIR / "collector_runtime.log"

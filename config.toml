@@ -80,6 +80,10 @@ min_auto_scale_notional = 0.2
 aggressive_autoscale = false
 dynamic_notional_fraction = 0.25
 
+enable_long_term_regime_filter = false
+long_term_fast_ma = 50
+long_term_slow_ma = 200
+long_term_regime_pair = "XXBTZEUR"
 [execution]
 signal_refresh_interval_seconds = 30
 regime_cache_ttl_seconds = 600
@@ -103,6 +107,7 @@ partial_exit_trigger_pct = 0.5
 partial_exit_fraction = 0.5
 partial_exit_min_remaining_eur = 5.0
 
+bb_std_dev = 2.0
 [daytrading]
 enable_daytrading = true
 max_hold_hours = 2
